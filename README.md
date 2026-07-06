@@ -5,15 +5,15 @@
 > the printer comes back. No app to install — just a browser.
 
 A terminal / CRT / hacker-vibe web app. Python backend (FastAPI + WebSocket), vanilla-JS
-frontend, physical printing over **WebUSB** (any printer the browser can claim — thermal or
-otherwise) plus a server-side **local bridge** for a printer wired directly into the host.
+frontend. A fax prints on the recipient's physical thermal printer via any of **three paths** —
+their **browser** (WebUSB), a printer wired into the **server host** (local bridge), or a headless
+**agent on their own Raspberry Pi** (printer node, authenticated with a device token).
 
 ```
-neo ──POST /api/fax──▶  FAXXME server  ──WebSocket push──▶  trinity's browser
-                        (FastAPI)                           └─WebUSB─▶ 🖨 ESC/POS
-                             │
-                             └─ local bridge ─▶ /dev/usb/lp0  (host-attached printer)
-                                 ▲ background watcher re-flushes the queue on hot-replug
+                                  ┌─ recipient's browser ───WebUSB──▶ 🖨
+ sender ─POST /api/fax─▶  FAXXME ─┼─ host local bridge ────────────▶ 🖨 /dev/usb/lp0
+                        (FastAPI)  └─ their Pi agent (device token)─▶ 🖨 /dev/usb/lp0
+                            │  offline → queue (SQLite) → flush on reconnect / hot-replug
 ```
 
 ## Screenshots
@@ -27,14 +27,16 @@ neo ──POST /api/fax──▶  FAXXME server  ──WebSocket push──▶  
 
 - **Accounts** — register/login, pbkdf2 password hashing + hmac-signed session cookies (no native deps).
 - **Compose** — searchable recipient picker, 200-char message, optional image, live char counter.
-- **Two print paths**
-  - *Browser WebUSB* — server builds the ESC/POS bytes, the recipient's browser forwards them raw to the USB printer.
-  - *Local bridge* — a printer wired into the host prints server-side, no browser needed.
+- **Three print paths**
+  - *Browser WebUSB* — server builds the ESC/POS bytes, the recipient's browser forwards them raw to the USB printer (auto re-binds on hot-replug, no click).
+  - *Local bridge* — a printer wired into the server host prints server-side, no browser needed.
+  - *Printer node (agent)* — a headless [agent](agent/README.md) on the recipient's own Raspberry Pi, authenticated with a **device token**, prints faxes locally.
+- **Device tokens** — per-account API token for the agent (sha256-hashed, shown once); regenerate to **revoke instantly** (the connected agent is kicked).
+- **Live printer status** — the PRINTER pill shows the best available path (`ONLINE` browser USB · `NODE ✓` agent · `WIRED` bridge · `OFFLINE`) and updates in real time; **TEST** prints a test page on whichever you have.
 - **Image attachments** — Floyd–Steinberg dithered to 1-bit halftone (`GS v 0` raster), with a live client-side preview.
-- **Offline queue** — undelivered faxes wait in SQLite and flush when the recipient (or the host printer) comes back.
-- **Printer hotplug watcher** — auto-prints the queue when a wired printer reappears, and pushes a live status update so the sender's outbox flips `queued → printed` without a refresh.
+- **Offline queue** — undelivered faxes wait in SQLite and flush when the recipient (browser/agent) reconnects, or when the host printer is hot-replugged (background watcher); the sender's outbox flips `queued → printed` live.
 - **Printed-receipt modal** — click any fax to see it as a paper slip (torn edges, dithered image).
-- **Housekeeping** — clear inbox/outbox (only your side; senders/recipients keep their copy), auto-cap at 50 per side, can't fax yourself.
+- **Housekeeping** — clear inbox/outbox (only your side; the other party keeps their copy), auto-cap at 50 per side, can't fax yourself.
 - **Configurable auto-cut** — full / feed-to-cutter / partial / none.
 - **`/healthz`** — liveness probe for Docker / systemd / uptime checks.
 
@@ -45,19 +47,23 @@ neo ──POST /api/fax──▶  FAXXME server  ──WebSocket push──▶  
 - **Send** (`POST /api/fax`). If the recipient is online, the server pushes the fax over their
   WebSocket; their browser writes the ESC/POS bytes to the USB printer and acks. If they're
   offline, the fax is **queued** in SQLite.
-- **Delivery on return.** Queued faxes flush when the recipient reconnects their browser, or —
-  for the host's wired printer — when the background watcher sees the device reappear (polls
-  every `FAXXME_PRINTER_POLL` seconds; covers unplug/replug without a restart).
+- **Delivery on return.** Queued faxes flush when the recipient reconnects (browser **or** Pi
+  agent), or — for the host's wired printer — when the background watcher sees the device
+  reappear (polls every `FAXXME_PRINTER_POLL` seconds; covers unplug/replug without a restart).
+- **Printer node = another WebSocket client.** The agent authenticates with a device token,
+  connects the same `/ws`, and writes the pushed ESC/POS bytes to its local printer — so
+  "others print to me" works with zero extra server logic (presence, queue, acks all reused).
 - **Single source of truth.** ESC/POS is built server-side (`faxxme/printer.py`); the browser
-  just forwards raw bytes over WebUSB, and the local bridge writes the same bytes to `/dev`.
+  forwards raw bytes over WebUSB, and the local bridge / agent write the same bytes to `/dev`.
 
 ## Documentation
 
 Deep-dive docs live in [`docs/`](docs/):
 
-- [How it works](docs/how-it-works.md) — architecture, delivery model, watcher, imaging.
+- [How it works](docs/how-it-works.md) — architecture, delivery model, watcher, imaging, tokens.
 - [Printer compatibility](docs/printers.md) — supported thermal printers, widths, auto-cut.
 - [Platform notes](docs/platforms.md) — WebUSB gotchas on Ubuntu / macOS / Windows.
+- [Printer node / agent](agent/README.md) — run FaxxMe on your own Pi (device token, no browser).
 
 ## Run
 
@@ -94,13 +100,15 @@ All configuration is via environment variables:
 | method | path | purpose |
 |--------|------|---------|
 | POST | `/api/register` · `/api/login` · `/api/logout` | auth (form fields) |
-| GET | `/api/me` | current user + printer/bridge status |
+| GET | `/api/me` | current user + `printer_online`, `local_bridge`, `node_online`, `has_token` |
 | GET | `/api/users` | other operators + online flags |
 | POST | `/api/fax` | send (multipart: `to`, `body`, optional `image`) |
 | GET | `/api/inbox` · `/api/outbox` | fax history (newest 50) |
 | POST | `/api/inbox/clear` · `/api/outbox/clear` | clear your side |
 | GET | `/api/fax/{id}/image` | the dithered PNG (sender/recipient only) |
-| WS | `/ws` | presence + live delivery + status pushes |
+| POST | `/api/token/regenerate` | issue a device token (shown once); revokes + kicks the old one |
+| POST | `/api/test-print` | print a test page on your node/bridge |
+| WS | `/ws` | presence + live delivery + status/node pushes; auth via **session cookie** (browser) or **`Authorization: Bearer <token>` + `X-Faxxme-User`** (agent) |
 | GET | `/healthz` | `{status, printer_bridge}` |
 | GET | `/` | the single-page CRT console |
 
@@ -110,8 +118,9 @@ Browsers only expose `navigator.usb` on **HTTPS or `localhost`**, and only Chrom
 browsers support it at all (no Safari/Firefox). Also, on **macOS/Windows** the OS claims
 class-compliant USB printers, so they won't appear in the WebUSB picker. Options:
 
-1. **Local bridge (simplest)** — the host-attached printer prints server-side and needs no
-   WebUSB. That's why the Pi's printer "just works" for callsign `pi`.
+1. **Local bridge / printer node (simplest)** — a printer wired into the server host, or the
+   recipient's own Pi running the [agent](agent/README.md), prints server-side with no WebUSB
+   at all. That's why the Pi's printer "just works".
 2. **Tailscale HTTPS** — real certs for the whole tailnet:
    ```bash
    sudo tailscale serve --bg http://localhost:8000   # → https://<host>.<tailnet>.ts.net
@@ -176,19 +185,21 @@ See [deploy/README.md](deploy/README.md) for stop/start/config/uninstall.
 
 Covers `/healthz`, auth + validation, offline queue → WebSocket flush → ack, immediate
 local-bridge print, **queue flush on printer reconnect**, image dithering + raster + access
-control, per-side clear, the 50-message cap, self-fax rejection, message-length limit, and
-anonymous-WebSocket rejection.
+control, per-side clear, the 50-message cap, self-fax rejection, message-length limit,
+anonymous-WebSocket rejection, **device-token auth + revocation**, the **node-online**
+indicator, and **test-print** routing to the agent.
 
 ## Project layout
 
 ```
 faxxme/__main__.py   `python -m faxxme` — the uvicorn daemon entrypoint
-faxxme/app.py        FastAPI app: auth, fax routing, presence, WS delivery, printer watcher
-faxxme/db.py         SQLite (stdlib) — users + faxes (+ dithered image BLOB)
-faxxme/auth.py       pbkdf2 password hashing + hmac-signed session cookies (no native deps)
+faxxme/app.py        FastAPI app: auth, fax routing, presence, WS delivery, printer watcher, tokens
+faxxme/db.py         SQLite (stdlib) — users (+ device-token hash) + faxes (+ dithered image BLOB)
+faxxme/auth.py       pbkdf2 passwords + hmac session cookies + device tokens (no native deps)
 faxxme/printer.py    ESC/POS receipt builder + auto-cut + local /dev printer bridge
 faxxme/imaging.py    image → Floyd–Steinberg halftone → GS v 0 raster (Pillow)
 static/              CRT terminal UI (index.html, style.css, app.js — WebUSB + WebSocket)
+agent/               printer-node agent for a Raspberry Pi (faxxme_agent.py, systemd, install)
 tests/test_api.py    end-to-end tests
 deploy/              systemd unit, udev rule, env, install/uninstall scripts
 Dockerfile · docker-compose.yml

@@ -5,26 +5,27 @@ an image), and it prints on **their** physical thermal printer — instantly if 
 around, or the moment their printer comes back if not.
 
 ```
-  sender's browser                    FAXXME server (FastAPI)                 recipient
- ┌────────────────┐   POST /api/fax  ┌────────────────────────┐   WS push   ┌──────────────┐
- │  compose form  │ ───────────────▶ │  deliver(fax):         │ ──────────▶ │ their browser│
- └────────────────┘                  │   1. recipient online? │             │  └─WebUSB─▶ 🖨 │
-        ▲ status "printed"           │   2. host local bridge?│             └──────────────┘
-        └──────── WS ◀───────────────│   3. else → queue (DB) │   or write ESC/POS bytes to
-                                     └────────────┬───────────┘   /dev/usb/lp0 (local bridge)
-                                        SQLite ◀──┘   ▲ background watcher re-flushes on replug
+  sender                          FAXXME server (FastAPI)             recipient prints via…
+ ┌────────────┐  POST /api/fax  ┌────────────────────────┐  WS push  ┌────────────────────────┐
+ │compose form│ ──────────────▶ │  deliver(fax):         │ ────────▶ │ browser (WebUSB)   🖨   │
+ └────────────┘                 │   1. recipient online? │           │ or their Pi agent  🖨   │
+     ▲ "printed" (WS)           │   2. host local bridge │           └────────────────────────┘
+     └──────────────────────────│   3. else → queue (DB) │  …or host local bridge → /dev/usb/lp0
+                                └───────────┬────────────┘  (background watcher flushes on replug)
+                                   SQLite ◀─┘
 ```
 
 ## Components
 
 | file | role |
 |------|------|
-| `faxxme/app.py` | FastAPI routes, WebSocket presence, delivery logic, printer watcher |
-| `faxxme/db.py` | SQLite (stdlib): `users` + `faxes` (with a dithered-image BLOB and per-side delete flags) |
-| `faxxme/auth.py` | pbkdf2 password hashing + hmac-signed session cookies (no native deps) |
+| `faxxme/app.py` | FastAPI routes, WebSocket presence, delivery logic, printer watcher, device tokens |
+| `faxxme/db.py` | SQLite (stdlib): `users` (+ device-token hash) + `faxes` (dithered-image BLOB, per-side delete flags) |
+| `faxxme/auth.py` | pbkdf2 passwords + hmac session cookies + device tokens (no native deps) |
 | `faxxme/printer.py` | builds the ESC/POS receipt, auto-cut, and the local `/dev` printer bridge |
 | `faxxme/imaging.py` | image → Floyd–Steinberg 1-bit halftone → `GS v 0` raster (Pillow) |
 | `static/` | the CRT single-page UI (WebUSB + WebSocket client) |
+| `agent/` | the headless printer-node agent for a Raspberry Pi (see [../agent/README.md](../agent/README.md)) |
 
 ## Presence — who's "online"
 
@@ -35,7 +36,9 @@ tab is open. The server keeps an in-memory map `user_id → {sockets}`. Online u
 - show a green dot in everyone's recipient search,
 - get live status updates (`queued → printed`).
 
-Presence is **not** persisted; it's purely "is a socket connected right now".
+Presence is **not** persisted; it's purely "is a socket connected right now". The server also
+tracks, per user, whether any connected socket is an **agent** (`node_online`) so the web UI
+can show `PRINTER: NODE ✓`.
 
 ## Sending a fax
 
@@ -43,8 +46,9 @@ Presence is **not** persisted; it's purely "is a socket connected right now".
 tries three things in order:
 
 1. **Recipient online (WebSocket)** → the server pushes the fax (with ready-to-print
-   ESC/POS bytes, base64) over their socket. Their browser writes the bytes straight to
-   the USB printer and sends an **ack**; the server marks it `delivered`.
+   ESC/POS bytes, base64) over their socket. The client — a **browser** (WebUSB) *or* a
+   **Pi agent** — writes the bytes to the printer and sends an **ack**; the server marks it
+   `delivered`.
 2. **Host local bridge** → if the recipient's callsign equals `FAXXME_LOCAL_USER` and the
    host's printer device is writable, the server prints the bytes itself to
    `FAXXME_PRINTER_DEV` (e.g. `/dev/usb/lp0`) and marks it `delivered`. No browser needed.
@@ -54,8 +58,8 @@ tries three things in order:
 
 A queued fax leaves the queue when:
 
-- **the recipient reconnects their browser** — on WebSocket connect the server flushes
-  every `pending` fax to them; or
+- **the recipient reconnects** (browser *or* Pi agent) — on WebSocket connect the server
+  flushes every `pending` fax to them; or
 - **the host printer reappears** — a background **watcher** polls `FAXXME_PRINTER_DEV`
   every `FAXXME_PRINTER_POLL` seconds (default 4). When the device is writable again
   (e.g. after an unplug/replug), it prints the local-bridge user's queued faxes and pushes
@@ -67,6 +71,24 @@ On the **browser/WebUSB** side there's a client-side equivalent: WebUSB permissi
 so FaxxMe re-binds a previously-authorized printer automatically on page load, and listens
 for USB `connect`/`disconnect` events — unplug/replug the printer and it re-binds and prints
 the waiting faxes on its own, no *CONNECT PRINTER* click needed.
+
+## Printer node (agent) & device tokens
+
+Instead of a browser, a user can run a headless **agent** on their own Raspberry Pi. It's just
+another WebSocket client, so the whole delivery model above works unchanged — the agent receives
+the same `fax` messages and writes the ESC/POS bytes to its local printer.
+
+- **Auth.** `/ws` accepts either a **session cookie** (browser) or a **device token** (agent),
+  sent as `Authorization: Bearer <token>` + `X-Faxxme-User: <callsign>`. The token is a
+  high-entropy string stored **sha256-hashed** in `users.token_hash`; `POST /api/token/regenerate`
+  issues a new one (returned once) and **immediately closes any agent connected with the old
+  token** — instant revocation.
+- **Node indicator.** When an agent connects/disconnects, the server broadcasts a `{type:node}`
+  message to that user's browser tabs, and the PRINTER pill live-updates
+  (`ONLINE` browser-USB → `NODE ✓` → `WIRED` → `OFFLINE`). While a node/bridge prints for you,
+  the browser's *CONNECT PRINTER* button is hidden (you don't need WebUSB).
+- **Test.** `POST /api/test-print` pushes a system-generated test receipt to your agent
+  (or host bridge) so **TEST** works even without a browser-bound printer.
 
 ## One source of truth: server-side ESC/POS
 

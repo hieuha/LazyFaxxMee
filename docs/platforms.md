@@ -1,8 +1,10 @@
 # Platform notes (Windows / Ubuntu / macOS)
 
 These notes are only about the **browser WebUSB** print path — binding a printer plugged
-into the *same computer as the browser*. If you use the **local bridge** (printer wired to
-the server host), none of this applies: the host prints server-side and any device works.
+into the *same computer as the browser*. If you use the **local bridge** (printer wired to the
+server host) or a **printer-node [agent](../agent/README.md)** (printer wired to your own Pi),
+none of this applies: the printer is driven server-side and any USB thermal printer works.
+On macOS/Windows, the agent on a small Linux box / Pi is the painless answer.
 
 ## Two universal rules for WebUSB
 
@@ -79,6 +81,6 @@ won't appear in Chrome's WebUSB picker by default.
 | you're on… | want the printer on this machine via browser? | do this |
 |------------|-----------------------------------------------|---------|
 | Ubuntu/Linux | yes | `sudo modprobe -r usblp` + udev rule + HTTPS, Chrome |
-| macOS | not really possible | use the **local bridge** on a Linux host, or browser-print fallback |
-| Windows | possible but fiddly | Zadig → WinUSB + HTTPS, Chrome; else local bridge |
-| **any** | **just want it to work** | **wire the printer to a Linux host / Pi and use the local bridge** |
+| macOS | not really possible | run the **[agent](../agent/README.md)** on a Pi, or the browser-print fallback |
+| Windows | possible but fiddly | Zadig → WinUSB + HTTPS, Chrome; else the agent on a Pi |
+| **any** | **just want it to work** | **wire the printer to a Pi and run the agent (or the host local bridge)** |

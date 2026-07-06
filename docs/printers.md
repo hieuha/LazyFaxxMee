@@ -4,17 +4,18 @@ FaxxMe speaks **raw ESC/POS** — the command language virtually every cheap USB
 thermal receipt printer understands. There are three ways bytes reach a printer; each has
 different requirements.
 
-## The three print paths
+## The print paths
 
 | path | where it runs | needs | best for |
 |------|---------------|-------|----------|
-| **Local bridge** | the server host | printer wired to the host; a writable `/dev/usb/lp*` (Linux) | a Raspberry Pi / always-on box with the printer attached |
-| **Browser WebUSB** | the recipient's browser | Chromium browser, HTTPS/localhost, a *claimable* USB interface | a printer plugged into the same computer as the browser |
+| **Local bridge** | the server host | printer wired to the host; a writable `/dev/usb/lp*` (Linux) | a Raspberry Pi / always-on box hosting the app + printer |
+| **Printer node (agent)** | the recipient's own Pi | the [agent](../agent/README.md) + a device token; a writable `/dev/usb/lp*` | each user having their own printer, anywhere with internet |
+| **Browser WebUSB** | the recipient's browser | Chromium, HTTPS/localhost, a *claimable* USB interface | a printer plugged into the same computer as the browser |
 | **Browser print** (fallback) | the recipient's browser | any OS-installed printer + driver | one-off manual prints (needs a click; can't auto-print) |
 
-The **local bridge is the most reliable** path and the one this project is built around:
-plug the printer into the host, set `FAXXME_LOCAL_USER`, done. WebUSB is finicky and
-OS-dependent — see [platforms.md](platforms.md).
+The **local bridge** and the **printer-node agent** are the most reliable paths (server-side
+ESC/POS → `/dev/usb/lp*`, no browser quirks). WebUSB is finicky and OS-dependent — see
+[platforms.md](platforms.md).
 
 ## What works well
 
