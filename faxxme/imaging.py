@@ -1,8 +1,8 @@
-"""Image → 1-bit halftone (Floyd–Steinberg dither) → ESC/POS raster bytes.
+"""Raster helpers for the thermal printer (all 1 bit per dot → ESC/POS `GS v 0`).
 
-Thermal printers are 1 bit per dot, so photos are error-diffusion dithered to black/white.
-We keep a compact dithered PNG (for on-screen display + browser-print fallback) and, at print
-time, pack it into a `GS v 0` raster command for the actual printer.
+- `process_upload` / `escpos_raster`: photos → Floyd–Steinberg dithered 1-bit → raster.
+- `text_raster`: Unicode text (Vietnamese, emoji…) the printer's code page can't show →
+  rendered with a bundled font and **thresholded** (crisp, not dithered) → raster.
 """
 import io
 import os

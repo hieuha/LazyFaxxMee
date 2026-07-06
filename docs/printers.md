@@ -39,6 +39,23 @@ Rule of thumb: **if it prints from a generic ESC/POS app, it works with FaxxMe.*
 
 If text wraps oddly or the image is too narrow/clipped, these two are what to tune.
 
+## Vietnamese / Unicode text
+
+Thermal printers only know a legacy code page (usually CP437), so accented Vietnamese
+(`ế ộ ậ ượ`), emoji, CJK, etc. can't be sent as bytes — most printers would print `?`.
+FaxxMe handles this automatically: a line that is **pure ASCII** is printed as fast native
+ESC/POS text, while a line with **any non-ASCII** character (a message line, or a sender name
+with diacritics) is **rendered with a bundled font and printed as a `GS v 0` raster** — so it
+works on *any* ESC/POS printer regardless of its code page. Tuning:
+
+| var | default | meaning |
+|-----|---------|---------|
+| `FAXXME_FONT` | bundled Google Fonts **Play** | any TTF with the glyphs you need |
+| `FAXXME_FONT_SIZE` | `26` | bigger = clearer on thermal (but fewer chars per line, more paper) |
+| `FAXXME_FONT_THRESHOLD` | `176` | black/white cutoff — raise it if text looks faint |
+
+The rendered text is **thresholded, not dithered**, so strokes stay solid and crisp.
+
 ## Auto-cut
 
 `FAXXME_CUT` controls the end-of-fax cut (sent as an ESC/POS command; printers without a
