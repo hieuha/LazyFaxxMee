@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import (FastAPI, WebSocket, WebSocketDisconnect, Request, Response,
                      HTTPException, Form, File, UploadFile)
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import auth, db, imaging, printer
@@ -470,9 +470,25 @@ async def healthz():
     return {"status": "ok", "printer_bridge": printer.local_available()}
 
 
+def _asset_version() -> int:
+    ver = 0
+    for f in ("app.js", "style.css"):
+        try:
+            ver = max(ver, int(os.path.getmtime(os.path.join(STATIC_DIR, f))))
+        except OSError:
+            pass
+    return ver
+
+
 @app.get("/")
 async def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    # cache-bust JS/CSS by their mtime so a deploy takes effect without a CDN purge
+    ver = _asset_version()
+    html = (html.replace("/static/app.js", f"/static/app.js?v={ver}")
+                .replace("/static/style.css", f"/static/style.css?v={ver}"))
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
