@@ -51,6 +51,14 @@ neo ──POST /api/fax──▶  FAXXME server  ──WebSocket push──▶  
 - **Single source of truth.** ESC/POS is built server-side (`faxxme/printer.py`); the browser
   just forwards raw bytes over WebUSB, and the local bridge writes the same bytes to `/dev`.
 
+## Documentation
+
+Deep-dive docs live in [`docs/`](docs/):
+
+- [How it works](docs/how-it-works.md) — architecture, delivery model, watcher, imaging.
+- [Printer compatibility](docs/printers.md) — supported thermal printers, widths, auto-cut.
+- [Platform notes](docs/platforms.md) — WebUSB gotchas on Ubuntu / macOS / Windows.
+
 ## Run
 
 ```bash
@@ -112,7 +120,8 @@ class-compliant USB printers, so they won't appear in the WebUSB picker. Options
 3. **Chrome flag** for LAN testing: `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
 
 On **Linux clients** the kernel `usblp` driver may hold the printer: `sudo modprobe -r usblp`
-first (this disables the host's own local bridge though).
+first (this disables the host's own local bridge though). Full per-OS guidance:
+[docs/platforms.md](docs/platforms.md).
 
 ## Printer permissions (host)
 
