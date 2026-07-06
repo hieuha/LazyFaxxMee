@@ -11,7 +11,9 @@ const api = async (path, opts = {}) => {
     let d = data.detail;
     if (Array.isArray(d)) d = d.map((e) => (e && e.msg) ? e.msg : JSON.stringify(e)).join("; ");
     else if (d && typeof d === "object") d = d.msg || JSON.stringify(d);
-    throw new Error(d || r.statusText || "request failed");
+    const err = new Error(d || r.statusText || "request failed");
+    err.status = r.status;
+    throw err;
   }
   return data;
 };
@@ -353,10 +355,35 @@ $("fax-form").onsubmit = async (e) => {
     $("fax-body").value = "";
     clearAttachment();
     await refreshLogs();
-  } catch (err) { msg.className = "msg err"; msg.textContent = "✗ " + err.message; }
+  } catch (err) {
+    msg.className = "msg err"; msg.textContent = "✗ " + err.message;
+    if (err.status === 429) alertBox(err.message, { title: "slow down" });   // rate limited
+  }
 };
 
 // ---- terminal-styled confirm modal ----
+function alertBox(message, { title = "notice", ok = "OK" } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      `<div class="modal" role="alertdialog" aria-modal="true">
+         <div class="modal-title">:: ${title}</div>
+         <div class="modal-body"></div>
+         <div class="modal-actions"><button data-act="ok">${ok}</button></div>
+       </div>`;
+    overlay.querySelector(".modal-body").textContent = message;
+    document.body.appendChild(overlay);
+    const done = () => { document.removeEventListener("keydown", onKey); overlay.remove(); resolve(); };
+    const onKey = (e) => { if (e.key === "Escape" || e.key === "Enter") done(); };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay || e.target.getAttribute("data-act") === "ok") done();
+    });
+    document.addEventListener("keydown", onKey);
+    requestAnimationFrame(() => overlay.querySelector('[data-act="ok"]').focus());
+  });
+}
+
 function confirmBox(message, { title = "confirm", ok = "CONFIRM", cancel = "CANCEL" } = {}) {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
