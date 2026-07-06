@@ -97,7 +97,7 @@ All configuration is via environment variables:
 | `FAXXME_PRINT_DOTS` | `384` | image raster width in dots (58mm ≈ 384, 80mm ≈ 576) |
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
-| `FAXXME_FONT` | bundled DejaVu Sans Mono | TTF used to render non-ASCII text (Vietnamese, emoji…) |
+| `FAXXME_FONT` | bundled Play (Google Fonts) | TTF used to render non-ASCII text (Vietnamese, emoji…) |
 | `FAXXME_FONT_SIZE` | `24` | font size for rendered Unicode text |
 | `FAXXME_FONT_THRESHOLD` | `176` | black/white cutoff for rendered text (higher = darker) |
 | `FAXXME_DB` / `FAXXME_SECRET` | in repo | sqlite + session-secret paths |
@@ -205,7 +205,7 @@ faxxme/db.py         SQLite (stdlib) — users (+ device-token hash) + faxes (+ 
 faxxme/auth.py       pbkdf2 passwords + hmac session cookies + device tokens (no native deps)
 faxxme/printer.py    ESC/POS receipt builder + auto-cut + local /dev printer bridge
 faxxme/imaging.py    image → halftone raster + Unicode text → crisp raster (Pillow)
-faxxme/fonts/        bundled DejaVu Sans Mono (renders Vietnamese/emoji)
+faxxme/fonts/        bundled Play font (renders Vietnamese/emoji)
 static/              CRT terminal UI (index.html, style.css, app.js — WebUSB + WebSocket)
 agent/               printer-node agent for a Raspberry Pi (faxxme_agent.py, systemd, install)
 tests/test_api.py    end-to-end tests
