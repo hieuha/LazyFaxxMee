@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 
@@ -188,37 +189,41 @@ async def _printer_watch() -> None:
 # --------------------------------------------------------------------------- #
 #  Auth API                                                                     #
 # --------------------------------------------------------------------------- #
-def _set_session(resp: Response, user_id: int) -> None:
+def _set_session(resp: Response, user_id: int, secure: bool) -> None:
     resp.set_cookie(
         auth.COOKIE_NAME, auth.make_token(user_id),
-        httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30, path="/",
+        httponly=True, samesite="lax", secure=secure,   # Secure only over HTTPS
+        max_age=60 * 60 * 24 * 30, path="/",
     )
 
 
+_USERNAME_RE = re.compile(r"[a-z0-9_]{2,24}")
+
+
 @app.post("/api/register")
-async def register(username: str = Form(...), password: str = Form(...),
+async def register(request: Request, username: str = Form(...), password: str = Form(...),
                    display_name: str = Form("")):
     username = username.strip().lower()
-    if not (2 <= len(username) <= 24) or not username.replace("_", "").isalnum():
-        raise HTTPException(400, "username must be 2-24 chars: letters, digits, underscore")
-    if len(password) < 4:
-        raise HTTPException(400, "password too short (min 4)")
+    if not _USERNAME_RE.fullmatch(username):
+        raise HTTPException(400, "username must be 2-24 chars: a-z, 0-9, underscore")
+    if len(password) < 8:
+        raise HTTPException(400, "password too short (min 8)")
     if db.get_user_by_name(username):
         raise HTTPException(409, "callsign already taken")
     ph, salt = auth.hash_password(password)
     user = db.create_user(username, (display_name.strip() or username)[:32], ph, salt)
     resp = JSONResponse({"ok": True, "user": _public(user)})
-    _set_session(resp, user["id"])
+    _set_session(resp, user["id"], secure=request.url.scheme == "https")
     return resp
 
 
 @app.post("/api/login")
-async def login(username: str = Form(...), password: str = Form(...)):
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
     user = db.get_user_by_name(username.strip().lower())
     if not user or not auth.verify_password(password, user["pass_hash"], user["salt"]):
         raise HTTPException(401, "bad callsign or password")
     resp = JSONResponse({"ok": True, "user": _public(user)})
-    _set_session(resp, user["id"])
+    _set_session(resp, user["id"], secure=request.url.scheme == "https")
     return resp
 
 
