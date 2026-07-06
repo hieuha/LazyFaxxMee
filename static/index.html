@@ -123,8 +123,7 @@
     <div class="log" id="outbox"></div>
 
     <h2>:: PRINTER NODE <span class="small">(run FaxxMe on your own Pi)</span></h2>
-    <div class="msg warn">⚠ Keep this token secret. Generating a new one <b>immediately revokes</b>
-      the previous token — update your Pi agent afterwards.</div>
+    <div class="msg warn hidden" id="token-active">A device token is active</div>
     <div class="row">
       <button type="button" id="gen-token" class="ghost">GENERATE TOKEN</button>
       <span class="small" id="token-status"></span>

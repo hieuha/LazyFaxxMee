@@ -252,6 +252,12 @@ async def regenerate_token(request: Request):
     user = require_user(request)
     token = auth.new_device_token()
     db.set_user_token(user["id"], auth.hash_token(token))
+    # kick any agent still using the old token so revocation is immediate
+    for ws in presence.agent_sockets(user["id"]):
+        try:
+            await ws.close(code=4401)
+        except Exception:
+            pass
     return {"ok": True, "username": user["username"], "token": token}
 
 

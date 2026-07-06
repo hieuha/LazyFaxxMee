@@ -126,7 +126,7 @@ async function enterConsole(m) {
 // ---- device token for the headless printer agent ----
 function initTokenUI(hasToken) {
   $("gen-token").textContent = hasToken ? "REGENERATE TOKEN" : "GENERATE TOKEN";
-  $("token-status").textContent = hasToken ? "a device token is active" : "no token yet";
+  $("token-active").classList.toggle("hidden", !hasToken);   // yellow "A device token is active"
 }
 $("gen-token").onclick = async () => {
   const regen = $("gen-token").textContent.startsWith("REGEN");
@@ -138,7 +138,7 @@ $("gen-token").onclick = async () => {
     $("token-value").textContent = d.token;
     $("token-reveal").classList.remove("hidden");
     $("gen-token").textContent = "REGENERATE TOKEN";
-    $("token-status").textContent = "token active — any previous token revoked";
+    $("token-active").classList.remove("hidden");
   } catch (err) { $("token-status").className = "small"; $("token-status").textContent = "✗ " + err.message; }
 };
 $("token-copy").onclick = async () => {

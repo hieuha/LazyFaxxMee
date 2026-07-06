@@ -68,8 +68,10 @@ and it prints on the Pi.
 
 - **Where does the token go?** Only in `agent/faxxme-agent.env` (`FAXXME_AGENT_TOKEN=`),
   file mode `600`. The agent never stores your password.
-- **Revoke:** regenerate the token on the web; the running agent will fail to reconnect until
-  you paste the new token and restart.
+- **Revoke:** regenerate the token on the web — the running agent is **disconnected
+  immediately** and can't reconnect until you paste the new token and `sudo systemctl restart
+  faxxme-agent`. (On the web the printer reverts to OFFLINE and the WebUSB *Connect* button
+  reappears.)
 - **Printer offline:** unplug/replug is fine — the agent keeps queued faxes and prints them
   when `FAXXME_PRINTER_DEV` is writable again (retries every `FAXXME_PRINTER_POLL` seconds).
 - **HTTPS:** use `https://` for `FAXXME_SERVER` over the internet (e.g. Tailscale / a TLS
