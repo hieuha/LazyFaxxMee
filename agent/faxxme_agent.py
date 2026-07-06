@@ -27,6 +27,7 @@ USER = os.environ.get("FAXXME_AGENT_USER", "").strip()
 TOKEN = os.environ.get("FAXXME_AGENT_TOKEN", "").strip()
 DEVICE = os.environ.get("FAXXME_PRINTER_DEV", "/dev/usb/lp0")
 POLL = float(os.environ.get("FAXXME_PRINTER_POLL", "4"))
+AGENT_UA = "FaxxMe-Agent/0.1 (+https://github.com/hieuha/LazyFaxxMee)"
 
 
 def log(*a):
@@ -63,6 +64,7 @@ def write_device(data: bytes) -> bool:
 async def run_once():
     headers = {"Authorization": f"Bearer {TOKEN}", "X-Faxxme-User": USER}
     async with websockets.connect(ws_url(), additional_headers=headers,
+                                  user_agent_header=AGENT_UA,
                                   ping_interval=20, ping_timeout=20) as ws:
         log("connected to", ws_url(), "as", USER)
         pending: dict[int, bytes] = {}     # fax_id -> ready-to-print ESC/POS bytes
