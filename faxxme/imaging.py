@@ -14,12 +14,12 @@ MAX_H = int(os.environ.get("FAXXME_IMG_MAX_H", "1200"))    # cap print height (d
 MAX_UPLOAD = int(os.environ.get("FAXXME_MAX_UPLOAD", str(6 * 1024 * 1024)))  # 6 MB
 
 # --- text-as-raster (for Unicode the printer's code page can't show: Vietnamese, emoji…) ---
-_BUNDLED_FONT = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSansMono-Bold.ttf")
+_BUNDLED_FONT = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSansMono.ttf")
 FONT_PATH = os.environ.get("FAXXME_FONT") or (
     _BUNDLED_FONT if os.path.exists(_BUNDLED_FONT)
-    else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf")
-FONT_SIZE = int(os.environ.get("FAXXME_FONT_SIZE", "28"))      # bigger = clearer on thermal
-FONT_THRESHOLD = int(os.environ.get("FAXXME_FONT_THRESHOLD", "170"))  # >0 = crisp (no dither)
+    else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
+FONT_SIZE = int(os.environ.get("FAXXME_FONT_SIZE", "24"))             # clear on thermal
+FONT_THRESHOLD = int(os.environ.get("FAXXME_FONT_THRESHOLD", "176"))  # >0 = crisp (no dither)
 
 GS = b"\x1d"
 

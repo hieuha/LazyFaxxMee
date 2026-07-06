@@ -1,6 +1,6 @@
 # Bundled font
 
-`DejaVuSansMono-Bold.ttf` — used to render Unicode text (Vietnamese, emoji, …) as a
+`DejaVuSansMono.ttf` — used to render Unicode text (Vietnamese, emoji, …) as a
 raster image when the thermal printer's code page can't represent it.
 
 **DejaVu Fonts** are free (Bitstream Vera + Arev derivative license — permissive, allows
