@@ -53,6 +53,7 @@ sudo systemctl restart faxxme
 | `FAXXME_LOG_LEVEL` | `info` | uvicorn log level |
 | `FAXXME_LOCAL_USER` | `pi` | callsign whose faxes print on this host's printer |
 | `FAXXME_PRINTER_DEV` | `/dev/usb/lp0` | printer device node |
+| `FAXXME_PRINTER_POLL` | `4` | seconds between printer hot-replug checks |
 | `FAXXME_WIDTH` / `FAXXME_PRINT_DOTS` | `32` / `384` | receipt width (58mm) |
 | `FAXXME_CUT` | `full` | end-of-fax cut: `full` / `feed` (feed-to-cutter) / `partial` / `none` |
 
