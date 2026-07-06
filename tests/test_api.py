@@ -87,6 +87,28 @@ def test_local_bridge_prints_immediately():
     assert b"FAXXME" in data and b"wired hello" in data
 
 
+def test_local_bridge_flushes_on_printer_reconnect():
+    """Fax queued while the printer is unplugged auto-prints when it comes back."""
+    import asyncio
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "alice", "password": "pw12"})
+    # printer "unplugged": device node gone -> fax queues
+    if os.path.exists(_printfile):
+        os.remove(_printfile)
+    assert not printer.local_available()
+    r = client.post("/api/fax", data={"to": "bob", "body": "queued while unplugged"})
+    assert r.json()["delivered"] is False
+    # printer "replugged": watcher flush prints + marks delivered
+    open(_printfile, "wb").close()
+    assert printer.local_available()
+    asyncio.run(appmod._flush_local_bridge())
+    assert b"queued while unplugged" in open(_printfile, "rb").read()
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "bob", "password": "pw12"})
+    inb = client.get("/api/inbox").json()["faxes"]
+    assert inb[0]["body"] == "queued while unplugged" and inb[0]["status"] == "delivered"
+
+
 def _png(w=64, h=40):
     from PIL import Image
     import io

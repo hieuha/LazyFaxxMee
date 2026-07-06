@@ -105,7 +105,8 @@ async function enterConsole(m) {
     // This callsign owns a printer wired directly into the server host.
     setPrinter("WIRED", "on");
     $("connect-usb").classList.add("ghost");
-    $("connect-usb").innerHTML = "▸ bind a LOCAL usb printer (optional)";
+    $("connect-usb").innerHTML = "▸ PRINTER (optional)";
+    $("connect-usb").title = "this host already prints via its wired printer";
     $("local-note").innerHTML =
       "▲ <b>this host has a printer wired in.</b> Faxes to @" + ME.username +
       " print here automatically — even with no browser open. You don't need to \"Connect USB\".";
@@ -420,6 +421,7 @@ function connectWS() {
   ws.onmessage = async (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === "fax") await onIncomingFax(m);
+    else if (m.type === "status") await refreshLogs();   // e.g. queued -> printed on the far end
   };
 }
 

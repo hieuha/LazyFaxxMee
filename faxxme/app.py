@@ -12,18 +12,22 @@ from fastapi.staticfiles import StaticFiles
 from . import auth, db, imaging, printer
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
+PRINTER_POLL = float(os.environ.get("FAXXME_PRINTER_POLL", "4"))  # seconds between printer checks
 
 
 @asynccontextmanager
 async def lifespan(_app: "FastAPI"):
     db.init()
-    # Flush anything queued for the host-attached printer, no browser needed.
-    if printer.LOCAL_USER and printer.local_available():
-        u = db.get_user_by_name(printer.LOCAL_USER)
-        if u:
-            for fax in db.pending_for(u["id"]):
-                await deliver(fax)
-    yield
+    # Background watcher: flushes the host printer's queue on boot AND on hot-replug.
+    watcher = asyncio.create_task(_printer_watch())
+    try:
+        yield
+    finally:
+        watcher.cancel()
+        try:
+            await watcher
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="FaxxMe", lifespan=lifespan)
@@ -124,6 +128,45 @@ async def deliver(fax: dict) -> bool:
             db.mark_delivered(fax["id"])
             return True
     return False
+
+
+async def _notify_status(fax_id: int) -> None:
+    """Push a fax's new status to any online sender/recipient so their logs update live."""
+    fax = db.get_fax(fax_id)
+    if not fax:
+        return
+    msg = {"type": "status", "fax_id": fax_id, "status": fax["status"]}
+    for uid in (fax["sender_id"], fax["recipient_id"]):
+        for ws in presence.sockets(uid):
+            try:
+                await ws.send_json(msg)
+            except Exception:
+                pass
+
+
+async def _flush_local_bridge() -> None:
+    """Print faxes queued for the host printer once it's available (boot or hot-replug)."""
+    if not (printer.LOCAL_USER and printer.local_available()):
+        return
+    u = db.get_user_by_name(printer.LOCAL_USER)
+    if not u:
+        return
+    for fax in db.pending_for(u["id"]):
+        if presence.online(u["id"]):
+            continue  # a live browser session handles delivery for this user
+        if printer.print_local(render_escpos(fax)):
+            db.mark_delivered(fax["id"])
+            await _notify_status(fax["id"])
+
+
+async def _printer_watch() -> None:
+    """Poll the wired printer; flush the queue whenever it (re)appears."""
+    while True:
+        try:
+            await _flush_local_bridge()
+        except Exception:
+            pass
+        await asyncio.sleep(PRINTER_POLL)
 
 
 # --------------------------------------------------------------------------- #

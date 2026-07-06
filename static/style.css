@@ -120,8 +120,13 @@ button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: .35; cursor: not-allowed; color: var(--fg-dim); border-color: var(--line-soft); text-shadow: none; }
 button.ghost { background: transparent; border-color: var(--line); color: var(--fg-mid); text-shadow: var(--glow-green); }
 button.ghost:hover:not(:disabled) { border-color: var(--fg); color: var(--fg-bright); background: rgba(70,240,138,.06); box-shadow: none; }
+button.danger { background: transparent; border-color: var(--red); color: var(--red); text-shadow: var(--glow-red); }
+button.danger:hover:not(:disabled) { background: var(--red); color: #180404; text-shadow: none; box-shadow: 0 0 10px rgba(255,107,107,.45); }
 
 .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+/* keep the two printer buttons on one row; long label wraps inside its button if too narrow */
+.printer-actions { flex-wrap: nowrap; }
+.printer-actions > button { min-width: 0; }
 .grow { flex: 1 1 220px; }
 
 /* consistent vertical rhythm for form field groups */
@@ -134,16 +139,25 @@ button.ghost:hover:not(:disabled) { border-color: var(--fg); color: var(--fg-bri
 
 /* ---- status bar ---- */
 .statusbar {
-  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 20px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 9px;  /* row 1: greeting, row 2: controls */
   border: 1px solid var(--line); border-radius: 2px;
   background: linear-gradient(rgba(70,240,138,.03), rgba(0,0,0,0));
-  padding: 11px 16px; margin-bottom: 20px; font-size: 13px; color: var(--fg-dim);
+  padding: 10px 14px; margin-bottom: 20px; font-size: 11.5px; color: var(--fg-dim);
   text-shadow: var(--glow-dim);
 }
+.sb-greeting { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* long name stays on its line */
+.sb-controls {
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 9px;   /* all controls on one line */
+  overflow-x: auto; scrollbar-width: none;                           /* scroll the row, not the page */
+}
+.sb-controls::-webkit-scrollbar { display: none; }
+.sb-controls > div { flex: 0 0 auto; }
 .statusbar b, #who { color: var(--fg-bright); text-shadow: var(--glow-bright); }
+.sb-printer, .sb-link { display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; }
+.statusbar button { padding: 3px 9px; font-size: 11px; letter-spacing: .4px; }
 .pill {
-  display: inline-block; padding: 1px 9px; border: 1px solid currentColor; border-radius: 2px;
-  font-size: 12px; letter-spacing: 1px; margin-left: 4px;
+  display: inline-block; padding: 1px 8px; border: 1px dashed currentColor; border-radius: 2px;
+  font-size: 11px; letter-spacing: 1px; margin-left: 4px;
 }
 .on   { color: var(--fg);   text-shadow: var(--glow-green); }
 .off  { color: var(--red);  text-shadow: var(--glow-red); }
@@ -151,6 +165,8 @@ button.ghost:hover:not(:disabled) { border-color: var(--fg); color: var(--fg-bri
 
 /* ---- messages (color-matched, no smudge) ---- */
 .msg { min-height: 20px; margin: 12px 0; font-size: 13.5px; }
+.msg:empty { min-height: 0; margin: 0; }          /* don't reserve space when there's no message */
+#local-note:empty { margin: 0; }
 .msg.err  { color: var(--red);        text-shadow: var(--glow-red); }
 .msg.ok   { color: var(--fg-bright);  text-shadow: var(--glow-bright); }
 .msg.info { color: var(--amber);      text-shadow: var(--glow-amber); }
@@ -160,7 +176,7 @@ button.ghost:hover:not(:disabled) { border-color: var(--fg); color: var(--fg-bri
 h2 {
   font-size: 13px; color: var(--amber); text-shadow: var(--glow-amber);
   letter-spacing: 2.5px; text-transform: uppercase; font-weight: 700;
-  margin: 30px 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--line);
+  margin: 20px 0 12px; padding-bottom: 7px; border-bottom: 1px solid var(--line);
   display: flex; align-items: baseline; gap: 8px;
 }
 h2 .small { color: var(--amber-dim); text-shadow: none; }

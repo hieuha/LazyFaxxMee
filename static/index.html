@@ -62,16 +62,15 @@
   <!-- CONSOLE -->
   <section id="console" class="hidden">
     <div class="statusbar">
-      <div>Welcome, <span class="on" id="who">--</span></div>
-      <div>PRINTER: <span class="pill off" id="printer-state">OFFLINE</span></div>
-      <div>LINK: <span class="pill off" id="link-state">DOWN</span></div>
-      <div><button id="logout" class="ghost">[ LOGOUT ]</button></div>
-    </div>
-
-    <h2>:: PRINTER LINK</h2>
-    <div class="row">
-      <button id="connect-usb">▸ CONNECT USB PRINTER</button>
-      <button id="print-test" class="ghost" disabled>test page</button>
+      <div class="sb-greeting">Welcome, <span class="on" id="who">--</span></div>
+      <div class="sb-controls">
+        <div class="sb-printer">YOUR PRINTER: <span class="pill off" id="printer-state">OFFLINE</span>
+          <button id="connect-usb">▸ CONNECT PRINTER</button>
+          <button id="print-test" class="ghost" disabled>TEST</button>
+        </div>
+        <div class="sb-link">LINK: <span class="pill off" id="link-state">DOWN</span>
+          <button id="logout" class="danger">[ LOGOUT ]</button></div>
+      </div>
     </div>
     <div class="msg info" id="printer-msg"></div>
     <p class="small block" id="local-note"></p>
