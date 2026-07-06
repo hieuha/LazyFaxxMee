@@ -287,3 +287,17 @@ def test_node_online_indicator():
         assert agent.receive_json()["type"] == "hello"
         assert client.get("/api/me").json()["node_online"] is True     # agent connected
     assert client.get("/api/me").json()["node_online"] is False         # agent gone
+
+
+def test_test_print_routes_to_agent():
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "alice", "password": "pw12"})
+    tok = client.post("/api/token/regenerate").json()["token"]
+    assert client.post("/api/test-print").json()["delivered"] is False   # no agent, not the bridge user
+    hdrs = {"Authorization": f"Bearer {tok}", "X-Faxxme-User": "alice"}
+    with client.websocket_connect("/ws", headers=hdrs) as agent:
+        assert agent.receive_json()["type"] == "hello"
+        assert client.post("/api/test-print").json()["delivered"] is True
+        fax = agent.receive_json()
+        assert fax["type"] == "fax"
+        assert b"TEST PRINT" in base64.b64decode(fax["escpos_b64"])

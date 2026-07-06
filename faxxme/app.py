@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import (FastAPI, WebSocket, WebSocketDisconnect, Request, Response,
@@ -70,6 +71,9 @@ class Presence:
     def browser_sockets(self, user_id: int) -> list[WebSocket]:
         agents = self._agents.get(user_id, set())
         return [w for w in self._sockets.get(user_id, ()) if w not in agents]
+
+    def agent_sockets(self, user_id: int) -> list[WebSocket]:
+        return list(self._agents.get(user_id, ()))
 
 
 presence = Presence()
@@ -339,6 +343,29 @@ async def clear_inbox_ep(request: Request):
 async def clear_outbox_ep(request: Request):
     user = require_user(request)
     return {"ok": True, "cleared": db.clear_outbox(user["id"])}
+
+
+@app.post("/api/test-print")
+async def test_print(request: Request):
+    """Print a test page on the user's own printer node (agent) or host local bridge."""
+    user = require_user(request)
+    now = time.time()
+    escpos = printer.build_receipt(
+        user["display_name"], user["username"],
+        "*** TEST PRINT ***\nyour FaxxMe printer node is working.", now)
+    payload = {"type": "fax", "id": 0, "from": "FAXXME", "from_username": "system",
+               "body": "test print", "created_at": now,
+               "escpos_b64": base64.b64encode(escpos).decode()}
+    delivered = False
+    for ws in presence.agent_sockets(user["id"]):
+        try:
+            await ws.send_json(payload)
+            delivered = True
+        except Exception:
+            pass
+    if not delivered and user["username"] == printer.LOCAL_USER and printer.local_available():
+        delivered = printer.print_local(escpos)
+    return {"ok": True, "delivered": delivered}
 
 
 # --------------------------------------------------------------------------- #

@@ -511,12 +511,16 @@ function setPrinter(state, cls) {
   el.textContent = state; el.className = "pill " + cls;
 }
 
-// pick the best available print path for the PRINTER pill
+// pick the best available print path for the PRINTER pill + button states
 function refreshPrinterPill() {
   if (usb) setPrinter("ONLINE", "on");            // a printer bound in this browser
   else if (nodeOnline) setPrinter("NODE ✓", "on"); // an agent (Pi node) is printing for me
   else if (localBridge) setPrinter("WIRED", "on"); // this host prints for my callsign
   else setPrinter("OFFLINE", "off");
+  // CONNECT PRINTER (WebUSB) is only needed when nothing else prints for you
+  $("connect-usb").classList.toggle("hidden", (nodeOnline || localBridge) && !usb);
+  // TEST works for whichever printer you have (browser USB, node, or bridge)
+  $("print-test").disabled = !(usb || nodeOnline || localBridge);
 }
 
 // Bind a USB device as the printer. announce=true surfaces detailed errors (manual click);
@@ -538,7 +542,6 @@ async function bindDevice(device, { announce = true } = {}) {
     await device.claimInterface(chosen.number);
     usb = { device, iface: chosen.number, endpoint: chosen.endpoint };
     refreshPrinterPill();
-    $("print-test").disabled = false;
     $("printer-msg").className = "msg ok";
     $("printer-msg").textContent = `✓ bound to ${device.productName || "printer"} (if#${chosen.number} ep#${chosen.endpoint})`;
     await flushQueue();          // print anything that queued while it was unbound
@@ -553,7 +556,6 @@ async function bindDevice(device, { announce = true } = {}) {
 function unbindPrinter() {
   usb = null;
   refreshPrinterPill();
-  $("print-test").disabled = true;
 }
 
 // Re-bind a printer the user already granted — no click needed (WebUSB permission persists).
@@ -622,10 +624,19 @@ async function usbWrite(bytes) {
 }
 
 $("print-test").onclick = async () => {
-  const bytes = new TextEncoder().encode(
-    "\x1b@\x1ba\x01\x1b!\x38FAXXME\x1b!\x00\nself-test OK\n\n\n\n\x1dV\x00");
-  try { await usbWrite(bytes); $("printer-msg").className = "msg ok"; $("printer-msg").textContent = "✓ test page sent"; }
-  catch (err) { $("printer-msg").className = "msg err"; $("printer-msg").textContent = "✗ " + err.message; }
+  const pm = $("printer-msg");
+  if (usb) {   // browser-bound printer → test client-side over WebUSB
+    const bytes = new TextEncoder().encode(
+      "\x1b@\x1ba\x01\x1b!\x38FAXXME\x1b!\x00\nself-test OK\n\n\n\n\x1dV\x00");
+    try { await usbWrite(bytes); pm.className = "msg ok"; pm.textContent = "✓ test page sent to the USB printer"; }
+    catch (err) { pm.className = "msg err"; pm.textContent = "✗ " + err.message; }
+  } else {     // node/bridge → ask the server to print a test page there
+    try {
+      const d = await api("/api/test-print", { method: "POST" });
+      pm.className = "msg " + (d.delivered ? "ok" : "warn");
+      pm.textContent = d.delivered ? "✓ test page sent to your printer node" : "◦ no printer node online to test";
+    } catch (err) { pm.className = "msg err"; pm.textContent = "✗ " + err.message; }
+  }
 };
 
 // browser-print fallback for non-USB / unsupported printers
