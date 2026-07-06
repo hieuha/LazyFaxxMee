@@ -59,6 +59,14 @@ def init() -> None:
         have_u = {r[1] for r in _conn.execute("PRAGMA table_info(users)").fetchall()}
         if "token_hash" not in have_u:
             _conn.execute("ALTER TABLE users ADD COLUMN token_hash TEXT")
+        # normalize any legacy non-lowercase usernames (idempotent; skip if it would collide)
+        for uid, uname in _conn.execute(
+                "SELECT id, username FROM users WHERE username <> lower(username)").fetchall():
+            low = uname.lower()
+            clash = _conn.execute(
+                "SELECT 1 FROM users WHERE username=? AND id<>?", (low, uid)).fetchone()
+            if not clash:
+                _conn.execute("UPDATE users SET username=? WHERE id=?", (low, uid))
         _conn.commit()
 
 
