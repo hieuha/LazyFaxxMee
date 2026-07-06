@@ -307,7 +307,6 @@ function openReceipt(f, dir) {
     `<div class="receipt-wrap">
        <div class="receipt">
          <div class="r-head">FAXXME</div>
-         <div class="r-sub">= incoming transmission =</div>
          <div class="r-rule">${rule}</div>
          <div class="r-meta r-from"></div>
          <div class="r-meta r-time"></div>
@@ -510,11 +509,12 @@ $("connect-usb").onclick = async () => {
   } catch (err) {
     const pm = $("printer-msg");
     if (err.name === "NotFoundError") {
-      // user closed the picker, or no USB printer on THIS machine
+      // empty picker ("no compatible devices") or user cancelled
       pm.className = "msg info";
-      pm.innerHTML = "◦ no printer selected. WebUSB binds a printer plugged into <b>this computer</b> " +
-        "(the one you're browsing on). To print on a remote/host printer, just fax that callsign — " +
-        "it prints there automatically.";
+      pm.innerHTML = "◦ no printer offered. Chrome only lists a USB printer it can actually claim — " +
+        "on <b>macOS</b> the system grabs standard printers (e.g. the PT-280), so they don't appear here, " +
+        "and Safari/Firefox don't support WebUSB at all. Easiest path: fax the <b>pi</b> callsign and it " +
+        "prints on the Raspberry Pi's wired printer automatically — no WebUSB needed.";
     } else if (String(err).toLowerCase().includes("claim") || err.name === "SecurityError") {
       pm.className = "msg err";
       pm.innerHTML = "✗ " + escapeHtml(err.message) +
@@ -550,7 +550,7 @@ function printFallback(m) {
   const imgTag = m.image_b64
     ? `<img src="${m.image_b64}" style="width:100%;image-rendering:pixelated;margin:6px 0">` : "";
   w.document.write(`<pre style="font:14px monospace;white-space:pre-wrap;width:300px">` +
-    `        F A X X M E\n= incoming transmission =\n--------------------------------\n` +
+    `        F A X X M E\n--------------------------------\n` +
     `FROM: ${escapeHtml(m.from)} @${escapeHtml(m.from_username)}\n` +
     `TIME: ${t}\n--------------------------------\n${escapeHtml(m.body)}\n</pre>` +
     imgTag +

@@ -54,7 +54,6 @@ def build_receipt(sender_display: str, sender_username: str, body: str,
     d += ESC + b"!" + b"\x38"            # double width/height + bold
     d += b"FAXXME\n"
     d += ESC + b"!" + b"\x00"            # normal
-    d += b"= incoming transmission =\n"
     d += b"-" * width + b"\n"
     d += ESC + b"a" + b"\x00"            # left
     from_line = f"FROM: {sender_display} @{sender_username}"

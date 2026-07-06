@@ -19,6 +19,13 @@ def _reg(u, p="pw12", name=None):
     return client.post("/api/register", data={"username": u, "password": p, "display_name": name or u})
 
 
+def test_healthz():
+    r = client.get("/healthz")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+    assert "printer_bridge" in r.json()
+
+
 def test_register_login_me():
     r = _reg("alice", name="Alice A")
     assert r.status_code == 200, r.text
@@ -58,6 +65,7 @@ def test_fax_queue_then_ws_flush():
         assert fax["from_username"] == "alice"
         raw = base64.b64decode(fax["escpos_b64"])
         assert b"FAXXME" in raw and b"meet at dawn" in raw
+        assert b"incoming transmission" not in raw  # subtitle line removed
         wsconn.send_json({"type": "ack", "fax_id": fax["id"]})
     # after ack it must be delivered
     inb = client.get("/api/inbox").json()["faxes"]

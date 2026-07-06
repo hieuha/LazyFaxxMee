@@ -311,6 +311,12 @@ async def ws_endpoint(ws: WebSocket):
 # --------------------------------------------------------------------------- #
 #  Static frontend                                                              #
 # --------------------------------------------------------------------------- #
+@app.get("/healthz")
+async def healthz():
+    """Liveness/readiness probe for load balancers, Docker, systemd, uptime checks."""
+    return {"status": "ok", "printer_bridge": printer.local_available()}
+
+
 @app.get("/")
 async def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
