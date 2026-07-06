@@ -1,0 +1,34 @@
+services:
+  faxxme:
+    build: .
+    image: faxxme:latest
+    container_name: faxxme
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      FAXXME_HOST: "0.0.0.0"
+      FAXXME_PORT: "8000"
+      FAXXME_LOG_LEVEL: "info"
+      FAXXME_WIDTH: "32"
+      FAXXME_PRINT_DOTS: "384"
+      # --- local-bridge printing (this host's wired thermal printer) ---
+      # OFF by default: browser/WebUSB printing works without any device access.
+      # To print on THIS host's printer instead:
+      #   1) plug the printer in
+      #   2) set the callsign below (whose faxes should print here)
+      #   3) uncomment the `devices` + `group_add` block further down
+      #   4) docker compose up -d
+      FAXXME_LOCAL_USER: ""
+      FAXXME_PRINTER_DEV: "/dev/usb/lp0"
+    volumes:
+      - faxxme-data:/data          # sqlite db + session secret persist here
+
+    # ---- uncomment to enable the host thermal-printer bridge ----
+    # devices:
+    #   - "/dev/usb/lp0:/dev/usb/lp0"
+    # group_add:
+    #   - "lp"                      # host lp gid (7) == lp in the image → device writable
+
+volumes:
+  faxxme-data:

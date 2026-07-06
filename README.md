@@ -78,6 +78,22 @@ The local bridge writes to `/dev/usb/lp0`, owned `root:lp`. This repo's setup ad
 rule (`/etc/udev/rules.d/99-faxxme-printer.rules`, `MODE=0666`) and put `pi` in the `lp`
 group so the server can print without root.
 
+## Run with Docker
+
+```bash
+docker compose up -d --build      # build + start on http://<host>:8000
+docker compose logs -f            # logs
+docker compose down               # stop
+```
+
+The sqlite db + session secret persist in the `faxxme-data` volume.
+
+**Printing:** browser/WebUSB printing works out of the box (it's client-side). To also
+print on the *container host's* wired thermal printer (the "local bridge"), edit
+`docker-compose.yml`: set `FAXXME_LOCAL_USER` to a callsign and uncomment the `devices` +
+`group_add` block (the printer must be plugged in when the container starts). USB hotplug
+is awkward in containers — for a host-attached printer the systemd deploy below is smoother.
+
 ## Run as a service (systemd)
 
 Deploy on a host so it starts on boot and you can manage it with `systemctl`:

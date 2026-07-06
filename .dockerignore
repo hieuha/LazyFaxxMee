@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+.faxxme_secret
+*.log
+.pytest_cache/
+tests/
+deploy/faxxme.env
+README.md
