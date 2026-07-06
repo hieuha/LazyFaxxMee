@@ -98,7 +98,7 @@ All configuration is via environment variables:
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
 | `FAXXME_FONT` | bundled Play (Google Fonts) | TTF used to render non-ASCII text (Vietnamese, emoji…) |
-| `FAXXME_FONT_SIZE` | `24` | font size for rendered Unicode text |
+| `FAXXME_FONT_SIZE` | `26` | font size for rendered Unicode text |
 | `FAXXME_FONT_THRESHOLD` | `176` | black/white cutoff for rendered text (higher = darker) |
 | `FAXXME_DB` / `FAXXME_SECRET` | in repo | sqlite + session-secret paths |
 

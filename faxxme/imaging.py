@@ -18,7 +18,7 @@ _BUNDLED_FONT = os.path.join(os.path.dirname(__file__), "fonts", "Play-Regular.t
 FONT_PATH = os.environ.get("FAXXME_FONT") or (
     _BUNDLED_FONT if os.path.exists(_BUNDLED_FONT)
     else "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
-FONT_SIZE = int(os.environ.get("FAXXME_FONT_SIZE", "24"))             # clear on thermal
+FONT_SIZE = int(os.environ.get("FAXXME_FONT_SIZE", "26"))             # clear on thermal
 FONT_THRESHOLD = int(os.environ.get("FAXXME_FONT_THRESHOLD", "176"))  # >0 = crisp (no dither)
 
 GS = b"\x1d"
