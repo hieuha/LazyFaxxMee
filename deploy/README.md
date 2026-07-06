@@ -54,6 +54,7 @@ sudo systemctl restart faxxme
 | `FAXXME_LOCAL_USER` | `pi` | callsign whose faxes print on this host's printer |
 | `FAXXME_PRINTER_DEV` | `/dev/usb/lp0` | printer device node |
 | `FAXXME_WIDTH` / `FAXXME_PRINT_DOTS` | `32` / `384` | receipt width (58mm) |
+| `FAXXME_CUT` | `full` | end-of-fax cut: `full` / `feed` (feed-to-cutter) / `partial` / `none` |
 
 ## Uninstall
 

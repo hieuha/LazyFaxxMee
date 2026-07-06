@@ -15,6 +15,7 @@ GS = b"\x1d"
 LOCAL_DEVICE = os.environ.get("FAXXME_PRINTER_DEV", "/dev/usb/lp0")
 LOCAL_USER = os.environ.get("FAXXME_LOCAL_USER")  # username whose faxes print on this host
 LOCAL_WIDTH = int(os.environ.get("FAXXME_WIDTH", "32"))  # chars per line (58mm ~= 32)
+CUT_MODE = os.environ.get("FAXXME_CUT", "full").lower()  # full | partial | feed | none
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -75,9 +76,25 @@ def build_receipt(sender_display: str, sender_username: str, body: str,
     d += b"-" * width + b"\n"
     d += ESC + b"a" + b"\x01"            # center
     d += b".: end of message :.\n"
-    d += b"\n\n\n\n"                     # feed for tear-off
-    d += GS + b"V" + b"\x00"             # full cut (ignored if unsupported)
+    d += _cut()
     return bytes(d)
+
+
+def _cut() -> bytes:
+    """Trailing feed and/or auto-cut, selected by FAXXME_CUT.
+
+    full    (default) small feed + full cut     — cutter cuts, tear-off printers ignore + tear
+    feed              feed-to-cutter + full cut — cleanest & least paper on printers WITH a cutter
+    partial           small feed + partial cut
+    none              feed only, tear by hand
+    """
+    if CUT_MODE == "none":
+        return b"\n\n\n"
+    if CUT_MODE == "feed":
+        return GS + b"VB" + b"\x00"          # GS V 66 0: feed paper to the cutter, then full cut
+    if CUT_MODE == "partial":
+        return b"\n\n" + GS + b"V" + b"\x01"
+    return b"\n\n" + GS + b"V" + b"\x00"      # full (default)
 
 
 def local_available() -> bool:
