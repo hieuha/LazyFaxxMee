@@ -275,3 +275,15 @@ def test_bad_device_token_rejected():
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws", headers={"Authorization": "Bearer nope", "X-Faxxme-User": "alice"}) as ws:
             ws.receive_json()
+
+
+def test_node_online_indicator():
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "alice", "password": "pw12"})
+    tok = client.post("/api/token/regenerate").json()["token"]
+    assert client.get("/api/me").json()["node_online"] is False
+    hdrs = {"Authorization": f"Bearer {tok}", "X-Faxxme-User": "alice"}
+    with client.websocket_connect("/ws", headers=hdrs) as agent:
+        assert agent.receive_json()["type"] == "hello"
+        assert client.get("/api/me").json()["node_online"] is True     # agent connected
+    assert client.get("/api/me").json()["node_online"] is False         # agent gone

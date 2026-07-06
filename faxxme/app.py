@@ -39,25 +39,37 @@ app = FastAPI(title="FaxxMe", lifespan=lifespan)
 class Presence:
     def __init__(self) -> None:
         self._sockets: dict[int, set[WebSocket]] = {}
+        self._agents: dict[int, set[WebSocket]] = {}   # subset that authed via device token
         self._lock = asyncio.Lock()
 
-    async def add(self, user_id: int, ws: WebSocket) -> None:
+    async def add(self, user_id: int, ws: WebSocket, is_agent: bool = False) -> None:
         async with self._lock:
             self._sockets.setdefault(user_id, set()).add(ws)
+            if is_agent:
+                self._agents.setdefault(user_id, set()).add(ws)
 
     async def remove(self, user_id: int, ws: WebSocket) -> None:
         async with self._lock:
-            socks = self._sockets.get(user_id)
-            if socks:
-                socks.discard(ws)
-                if not socks:
-                    self._sockets.pop(user_id, None)
+            for store in (self._sockets, self._agents):
+                socks = store.get(user_id)
+                if socks:
+                    socks.discard(ws)
+                    if not socks:
+                        store.pop(user_id, None)
 
     def online(self, user_id: int) -> bool:
         return bool(self._sockets.get(user_id))
 
+    def node_online(self, user_id: int) -> bool:
+        """True if a headless printer agent (Pi node) is connected for this user."""
+        return bool(self._agents.get(user_id))
+
     def sockets(self, user_id: int) -> list[WebSocket]:
         return list(self._sockets.get(user_id, ()))
+
+    def browser_sockets(self, user_id: int) -> list[WebSocket]:
+        agents = self._agents.get(user_id, set())
+        return [w for w in self._sockets.get(user_id, ()) if w not in agents]
 
 
 presence = Presence()
@@ -224,6 +236,7 @@ async def me(request: Request):
         "user": _public(user),
         "printer_online": presence.online(user["id"]),
         "local_bridge": user["username"] == printer.LOCAL_USER and printer.local_available(),
+        "node_online": presence.node_online(user["id"]),
         "has_token": bool(user.get("token_hash")),
     }
 
@@ -345,14 +358,27 @@ def _ws_authenticate(ws: WebSocket) -> dict | None:
     return db.get_user(uid) if uid else None
 
 
+async def _broadcast_node(user_id: int, online: bool) -> None:
+    """Tell a user's browser tabs whether their printer node (agent) is connected."""
+    msg = {"type": "node", "online": online}
+    for ws in presence.browser_sockets(user_id):
+        try:
+            await ws.send_json(msg)
+        except Exception:
+            pass
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     user = _ws_authenticate(ws)
     if not user:
         await ws.close(code=4401)
         return
+    is_agent = ws.headers.get("authorization", "").lower().startswith("bearer ")
     await ws.accept()
-    await presence.add(user["id"], ws)
+    await presence.add(user["id"], ws, is_agent=is_agent)
+    if is_agent:
+        await _broadcast_node(user["id"], True)
     try:
         await ws.send_json({"type": "hello", "user": _public(user)})
         # flush queued faxes now that a printer is online
@@ -373,6 +399,8 @@ async def ws_endpoint(ws: WebSocket):
         pass
     finally:
         await presence.remove(user["id"], ws)
+        if is_agent and not presence.node_online(user["id"]):
+            await _broadcast_node(user["id"], False)
 
 
 # --------------------------------------------------------------------------- #

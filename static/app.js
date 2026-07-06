@@ -97,13 +97,16 @@ $("logout").onclick = async () => {
 
 // --------------------------------------------------------------- console ---
 let ME = null;
+let nodeOnline = false;    // a printer agent (Pi node) is connected for my callsign
+let localBridge = false;   // the server host has a wired printer for my callsign
 async function enterConsole(m) {
   ME = m.user;
   $("console").classList.remove("hidden");
   $("who").textContent = ME.display_name + " @" + ME.username;
+  localBridge = !!m.local_bridge;
+  nodeOnline = !!m.node_online;
   if (m.local_bridge) {
     // This callsign owns a printer wired directly into the server host.
-    setPrinter("WIRED", "on");
     $("connect-usb").classList.add("ghost");
     $("connect-usb").innerHTML = "▸ PRINTER (optional)";
     $("connect-usb").title = "this host already prints via its wired printer";
@@ -111,6 +114,7 @@ async function enterConsole(m) {
       "▲ <b>this host has a printer wired in.</b> Faxes to @" + ME.username +
       " print here automatically — even with no browser open. You don't need to \"Connect USB\".";
   }
+  refreshPrinterPill();
   initTokenUI(m.has_token);
   await refreshUsers();
   await refreshLogs();
@@ -450,6 +454,7 @@ function connectWS() {
     const m = JSON.parse(ev.data);
     if (m.type === "fax") await onIncomingFax(m);
     else if (m.type === "status") await refreshLogs();   // e.g. queued -> printed on the far end
+    else if (m.type === "node") { nodeOnline = m.online; refreshPrinterPill(); }  // Pi agent on/off
   };
 }
 
@@ -506,6 +511,14 @@ function setPrinter(state, cls) {
   el.textContent = state; el.className = "pill " + cls;
 }
 
+// pick the best available print path for the PRINTER pill
+function refreshPrinterPill() {
+  if (usb) setPrinter("ONLINE", "on");            // a printer bound in this browser
+  else if (nodeOnline) setPrinter("NODE ✓", "on"); // an agent (Pi node) is printing for me
+  else if (localBridge) setPrinter("WIRED", "on"); // this host prints for my callsign
+  else setPrinter("OFFLINE", "off");
+}
+
 // Bind a USB device as the printer. announce=true surfaces detailed errors (manual click);
 // announce=false is used for silent auto-(re)binding on page load / hot-replug.
 async function bindDevice(device, { announce = true } = {}) {
@@ -524,7 +537,7 @@ async function bindDevice(device, { announce = true } = {}) {
     if (!chosen) throw new Error("no OUT endpoint found on this device");
     await device.claimInterface(chosen.number);
     usb = { device, iface: chosen.number, endpoint: chosen.endpoint };
-    setPrinter("ONLINE", "on");
+    refreshPrinterPill();
     $("print-test").disabled = false;
     $("printer-msg").className = "msg ok";
     $("printer-msg").textContent = `✓ bound to ${device.productName || "printer"} (if#${chosen.number} ep#${chosen.endpoint})`;
@@ -539,7 +552,7 @@ async function bindDevice(device, { announce = true } = {}) {
 
 function unbindPrinter() {
   usb = null;
-  setPrinter("OFFLINE", "off");
+  refreshPrinterPill();
   $("print-test").disabled = true;
 }
 
