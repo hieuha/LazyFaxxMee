@@ -1,0 +1,565 @@
+"use strict";
+// FaxxMe client: CRT boot -> auth -> console. Live delivery over WebSocket,
+// physical printing over WebUSB (ESC/POS bytes are built server-side and forwarded raw).
+
+const $ = (id) => document.getElementById(id);
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { credentials: "same-origin", ...opts });
+  let data = {};
+  try { data = await r.json(); } catch (_) {}
+  if (!r.ok) {
+    let d = data.detail;
+    if (Array.isArray(d)) d = d.map((e) => (e && e.msg) ? e.msg : JSON.stringify(e)).join("; ");
+    else if (d && typeof d === "object") d = d.msg || JSON.stringify(d);
+    throw new Error(d || r.statusText || "request failed");
+  }
+  return data;
+};
+const form = (obj) => {
+  const f = new FormData();
+  for (const k in obj) f.append(k, obj[k]);
+  return f;
+};
+
+// ------------------------------------------------------------------ boot ---
+const BOOT = [
+  "initializing faxxme terminal...",
+  "loading phosphor driver .......... OK",
+  "spinning up modem ................ 56k CARRIER",
+  "handshaking with mainframe ....... OK",
+  "scanning for thermal printers ....",
+  "ready.",
+];
+async function boot() {
+  const el = $("bootlog");
+  for (const line of BOOT) {
+    const div = document.createElement("div");
+    div.textContent = "> " + line;
+    el.appendChild(div);
+    await sleep(line.includes("scanning") ? 320 : 160);
+  }
+  $("boot").classList.add("hidden");
+  try {
+    const m = await api("/api/me");
+    enterConsole(m);
+  } catch (_) {
+    showAuth();
+  }
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------------------ auth ---
+function showAuth() {
+  $("auth").classList.remove("hidden");
+  showLogin();
+}
+function showLogin() {
+  $("login-form").classList.remove("hidden");
+  $("register-form").classList.add("hidden");
+  $("login-user").focus();
+}
+function showRegister() {
+  $("register-form").classList.remove("hidden");
+  $("login-form").classList.add("hidden");
+  $("reg-user").focus();
+}
+$("tab-login").onclick = showLogin;
+$("tab-register").onclick = showRegister;
+
+$("login-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const msg = $("login-msg"); msg.className = "msg"; msg.textContent = "authenticating...";
+  try {
+    const d = await api("/api/login", { method: "POST",
+      body: form({ username: $("login-user").value, password: $("login-pass").value }) });
+    $("auth").classList.add("hidden");
+    enterConsole(await api("/api/me"));
+  } catch (err) { msg.className = "msg err"; msg.textContent = "✗ " + err.message; }
+};
+
+$("register-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const msg = $("reg-msg"); msg.className = "msg"; msg.textContent = "creating account...";
+  try {
+    await api("/api/register", { method: "POST", body: form({
+      username: $("reg-user").value, password: $("reg-pass").value,
+      display_name: $("reg-name").value }) });
+    $("auth").classList.add("hidden");
+    enterConsole(await api("/api/me"));
+  } catch (err) { msg.className = "msg err"; msg.textContent = "✗ " + err.message; }
+};
+
+$("logout").onclick = async () => {
+  try { await api("/api/logout", { method: "POST" }); } catch (_) {}
+  if (ws) { ws.close(); ws = null; }
+  location.reload();
+};
+
+// --------------------------------------------------------------- console ---
+let ME = null;
+async function enterConsole(m) {
+  ME = m.user;
+  $("console").classList.remove("hidden");
+  $("who").textContent = ME.display_name + " @" + ME.username;
+  if (m.local_bridge) {
+    // This callsign owns a printer wired directly into the server host.
+    setPrinter("WIRED", "on");
+    $("connect-usb").classList.add("ghost");
+    $("connect-usb").innerHTML = "▸ bind a LOCAL usb printer (optional)";
+    $("local-note").innerHTML =
+      "▲ <b>this host has a printer wired in.</b> Faxes to @" + ME.username +
+      " print here automatically — even with no browser open. You don't need to \"Connect USB\".";
+  }
+  await refreshUsers();
+  await refreshLogs();
+  updateComposeState();
+  connectWS();
+}
+
+// ---- recipient combobox (searchable, scales to many friends) ----
+let ALL_USERS = [];
+let ddActive = -1;   // keyboard-highlighted index in the current filtered list
+
+async function refreshUsers() {
+  try {
+    const d = await api("/api/users");
+    ALL_USERS = d.users;
+    if (!$("user-dropdown").classList.contains("hidden")) renderDropdown();
+  } catch (_) {}
+}
+
+function filteredUsers() {
+  const q = $("fax-to").value.trim().toLowerCase();
+  return ALL_USERS
+    .filter((u) => !q || u.username.toLowerCase().includes(q) ||
+                   (u.display_name || "").toLowerCase().includes(q))
+    .sort((a, b) => (b.online - a.online) || a.username.localeCompare(b.username));  // online first
+}
+
+function renderDropdown() {
+  const dd = $("user-dropdown");
+  const list = filteredUsers();
+  const online = ALL_USERS.filter((u) => u.online).length;
+  let html = `<div class="dd-head"><span>${ALL_USERS.length} operators · ${online} online</span><span>↑↓ · enter</span></div>`;
+  if (!list.length) {
+    html += `<div class="dd-empty">${ALL_USERS.length ? "no match" : "no other operators yet"}</div>`;
+  } else {
+    html += list.map((u, i) =>
+      `<div class="opt${i === ddActive ? " active" : ""}" data-user="${escapeHtml(u.username)}" role="option">
+         <span class="dot ${u.online ? "on" : "off"}">${u.online ? "●" : "○"}</span>
+         <span class="u">@${escapeHtml(u.username)}</span>
+         <span class="nm">${escapeHtml(u.display_name || "")}</span>
+       </div>`).join("");
+  }
+  dd.innerHTML = html;
+}
+
+function openDropdown() { ddActive = -1; renderDropdown(); $("user-dropdown").classList.remove("hidden"); $("fax-to").setAttribute("aria-expanded", "true"); }
+function closeDropdown() { $("user-dropdown").classList.add("hidden"); $("fax-to").setAttribute("aria-expanded", "false"); ddActive = -1; }
+function pickUser(username) { $("fax-to").value = username; closeDropdown(); updateComposeState(); $("fax-body").focus(); }
+function scrollActive() { const el = $("user-dropdown").querySelector(".opt.active"); if (el) el.scrollIntoView({ block: "nearest" }); }
+
+$("fax-to").addEventListener("focus", openDropdown);
+$("fax-to").addEventListener("input", () => { ddActive = -1; openDropdown(); });
+$("user-dropdown").addEventListener("mousedown", (e) => {
+  const opt = e.target.closest(".opt");
+  if (opt) { e.preventDefault(); pickUser(opt.getAttribute("data-user")); }
+});
+$("fax-to").addEventListener("keydown", (e) => {
+  if ($("user-dropdown").classList.contains("hidden")) return;
+  const list = filteredUsers();
+  if (e.key === "ArrowDown") { e.preventDefault(); ddActive = Math.min(ddActive + 1, list.length - 1); renderDropdown(); scrollActive(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); ddActive = Math.max(ddActive - 1, 0); renderDropdown(); scrollActive(); }
+  else if (e.key === "Enter") {
+    if (ddActive >= 0 && list[ddActive]) { e.preventDefault(); pickUser(list[ddActive].username); }
+    else if (list.length === 1) { e.preventDefault(); pickUser(list[0].username); }
+    else closeDropdown();
+  } else if (e.key === "Escape") { closeDropdown(); }
+});
+document.addEventListener("mousedown", (e) => { if (!e.target.closest(".combo")) closeDropdown(); });
+
+function faxEntry(f, dir) {
+  const who = dir === "in" ? ("@" + f.sender_name) : ("@" + f.recipient_name);
+  const t = new Date(f.created_at * 1000).toLocaleString();
+  const status = f.status === "delivered" ? "printed" : "queued";
+  const div = document.createElement("div");
+  div.className = "entry clickable";
+  div.title = "click to view the printed slip";
+  div.innerHTML =
+    `<div class="meta">${dir === "in" ? "◀ FROM " : "▶ TO "} ${who} · ${t} · [${status}]${f.has_image ? " · [img]" : ""}</div>` +
+    `<div class="bodytext"></div>`;
+  div.querySelector(".bodytext").textContent = f.body || "(image only)";
+  if (f.has_image) {
+    const img = document.createElement("img");
+    img.className = "fax-img"; img.loading = "lazy";
+    img.src = `/api/fax/${f.id}/image`;
+    div.appendChild(img);
+  }
+  div.onclick = () => openReceipt(f, dir);
+  return div;
+}
+async function refreshLogs() {
+  try {
+    const inb = await api("/api/inbox");
+    const box = $("inbox"); box.innerHTML = "";
+    if (!inb.faxes.length) box.innerHTML = '<div class="empty">— nothing received —</div>';
+    inb.faxes.forEach((f) => box.appendChild(faxEntry(f, "in")));
+    $("clear-inbox").classList.toggle("hidden", inb.faxes.length === 0);
+    const out = await api("/api/outbox");
+    const ob = $("outbox"); ob.innerHTML = "";
+    if (!out.faxes.length) ob.innerHTML = '<div class="empty">— nothing sent —</div>';
+    out.faxes.forEach((f) => ob.appendChild(faxEntry(f, "out")));
+    $("clear-outbox").classList.toggle("hidden", out.faxes.length === 0);
+  } catch (_) {}
+}
+
+// ---- compose: live char counter + enable/disable TRANSMIT ----
+const MAX_BODY = 200;
+function updateComposeState() {
+  const len = $("fax-body").value.length;
+  const cnt = $("body-count");
+  cnt.textContent = `${len} / ${MAX_BODY}`;
+  cnt.classList.toggle("full", len >= MAX_BODY);
+  const hasRecipient = $("fax-to").value.trim().length > 0;
+  const hasImage = $("fax-image").files.length > 0;
+  $("transmit-btn").disabled = !hasRecipient || (len === 0 && !hasImage);  // need recipient + (text OR image)
+}
+$("fax-body").addEventListener("input", updateComposeState);
+$("fax-to").addEventListener("input", updateComposeState);
+
+// ---- compose / send ----
+$("fax-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const msg = $("fax-msg"); msg.className = "msg";
+  if (!$("fax-to").value.trim()) {
+    msg.className = "msg err"; msg.textContent = "✗ pick a recipient callsign first";
+    return;
+  }
+  if ($("fax-to").value.trim().toLowerCase() === ME.username) {
+    msg.className = "msg err"; msg.textContent = "✗ you can't fax yourself — pick a friend's callsign";
+    return;
+  }
+  if ($("fax-body").value.length > MAX_BODY) {
+    msg.className = "msg err"; msg.textContent = `✗ message too long (max ${MAX_BODY})`;
+    return;
+  }
+  msg.textContent = "transmitting...";
+  const fd = new FormData();
+  fd.append("to", $("fax-to").value);
+  fd.append("body", $("fax-body").value);
+  const file = $("fax-image").files[0];
+  if (file) fd.append("image", file);
+  try {
+    const d = await api("/api/fax", { method: "POST", body: fd });
+    msg.className = "msg ok";
+    msg.textContent = (d.delivered ? "✓ delivered & printing on their end"
+                                   : "✓ queued — prints when they come online")
+                    + (d.has_image ? " · image dithered ✓" : "");
+    $("fax-body").value = "";
+    clearAttachment();
+    await refreshLogs();
+  } catch (err) { msg.className = "msg err"; msg.textContent = "✗ " + err.message; }
+};
+
+// ---- terminal-styled confirm modal ----
+function confirmBox(message, { title = "confirm", ok = "CONFIRM", cancel = "CANCEL" } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      `<div class="modal" role="dialog" aria-modal="true">
+         <div class="modal-title">:: ${title}</div>
+         <div class="modal-body"></div>
+         <div class="modal-actions">
+           <button class="ghost" data-act="cancel">${cancel}</button>
+           <button data-act="ok">${ok}</button>
+         </div>
+       </div>`;
+    overlay.querySelector(".modal-body").textContent = message;
+    document.body.appendChild(overlay);
+    const done = (v) => { document.removeEventListener("keydown", onKey); overlay.remove(); resolve(v); };
+    const onKey = (e) => {
+      if (e.key === "Escape") done(false);
+      else if (e.key === "Enter") done(true);
+    };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) return done(false);
+      const act = e.target.getAttribute("data-act");
+      if (act) done(act === "ok");
+    });
+    document.addEventListener("keydown", onKey);
+    requestAnimationFrame(() => overlay.querySelector('[data-act="ok"]').focus());
+  });
+}
+
+// ---- receipt modal: render a fax exactly like the printed paper slip ----
+function openReceipt(f, dir) {
+  const from = dir === "in"
+    ? { name: f.sender_display, user: f.sender_name }
+    : { name: ME.display_name, user: ME.username };  // outbox: the slip printed on their end shows YOU
+  const stamp = fmtStamp(f.created_at);
+  const rule = "-".repeat(32);
+  const imgTag = f.has_image ? `<img class="r-img" src="/api/fax/${f.id}/image" alt="fax image">` : "";
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay receipt-overlay";
+  overlay.innerHTML =
+    `<div class="receipt-wrap">
+       <div class="receipt">
+         <div class="r-head">FAXXME</div>
+         <div class="r-sub">= incoming transmission =</div>
+         <div class="r-rule">${rule}</div>
+         <div class="r-meta r-from"></div>
+         <div class="r-meta r-time"></div>
+         <div class="r-rule">${rule}</div>
+         <div class="r-body"></div>
+         ${imgTag}
+         <div class="r-rule">${rule}</div>
+         <div class="r-end">.: end of message :.</div>
+       </div>
+       <button type="button" class="ghost r-close">✕ close</button>
+     </div>`;
+  overlay.querySelector(".r-from").textContent = `FROM: ${from.name} @${from.user}`;
+  overlay.querySelector(".r-time").textContent = `TIME: ${stamp}`;
+  overlay.querySelector(".r-body").textContent = f.body || "";
+  if (!f.body) overlay.querySelector(".r-body").classList.add("hidden");
+  document.body.appendChild(overlay);
+
+  const done = () => { document.removeEventListener("keydown", onKey); overlay.remove(); };
+  const onKey = (e) => { if (e.key === "Escape") done(); };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.classList.contains("r-close")) done();
+  });
+  document.addEventListener("keydown", onKey);
+}
+function fmtStamp(sec) {
+  const d = new Date(sec * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ` +
+         `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+// ---- clear inbox / outbox (only ever affects YOUR side) ----
+$("clear-inbox").onclick = () => clearBox("inbox");
+$("clear-outbox").onclick = () => clearBox("outbox");
+async function clearBox(which) {
+  const note = which === "inbox"
+    ? "Clear your inbox? This removes these faxes from your account only — senders still keep their copy."
+    : "Clear your outbox? This removes these faxes from your account only — recipients still keep their copy.";
+  if (!(await confirmBox(note, { title: "clear " + which, ok: "CLEAR" }))) return;
+  try { await api(`/api/${which}/clear`, { method: "POST" }); await refreshLogs(); }
+  catch (err) { /* non-fatal */ }
+}
+
+// ---- image attachment: pick + live halftone preview (Floyd–Steinberg) ----
+$("attach-btn").onclick = () => $("fax-image").click();
+$("attach-clear").onclick = clearAttachment;
+$("fax-image").onchange = () => {
+  const file = $("fax-image").files[0];
+  if (!file) return clearAttachment();
+  $("attach-name").textContent = file.name;
+  $("attach-clear").classList.remove("hidden");
+  ditherPreview(file);
+  updateComposeState();
+};
+function clearAttachment() {
+  $("fax-image").value = "";
+  $("attach-name").textContent = "";
+  $("attach-clear").classList.add("hidden");
+  $("attach-preview").classList.add("hidden");
+  $("attach-img").removeAttribute("src");
+  updateComposeState();
+}
+function ditherPreview(file) {
+  const url = URL.createObjectURL(file);
+  const im = new Image();
+  im.onload = () => {
+    const W = 240, H = Math.max(1, Math.round(im.height * W / im.width));
+    const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+    const ctx = cv.getContext("2d"); ctx.drawImage(im, 0, 0, W, H);
+    const id = ctx.getImageData(0, 0, W, H), px = id.data;
+    const g = new Float32Array(W * H);
+    let mn = 255, mx = 0;
+    for (let i = 0; i < W * H; i++) {
+      const v = 0.299 * px[i*4] + 0.587 * px[i*4+1] + 0.114 * px[i*4+2];
+      g[i] = v; if (v < mn) mn = v; if (v > mx) mx = v;
+    }
+    const rng = (mx - mn) || 1;
+    for (let i = 0; i < W * H; i++) g[i] = (g[i] - mn) * 255 / rng;   // autocontrast
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {          // Floyd–Steinberg
+      const i = y * W + x, oldv = g[i], nv = oldv < 128 ? 0 : 255, err = oldv - nv;
+      g[i] = nv;
+      if (x + 1 < W) g[i+1] += err * 7 / 16;
+      if (y + 1 < H) {
+        if (x > 0) g[i+W-1] += err * 3 / 16;
+        g[i+W] += err * 5 / 16;
+        if (x + 1 < W) g[i+W+1] += err * 1 / 16;
+      }
+    }
+    for (let i = 0; i < W * H; i++) { const v = g[i]; px[i*4] = px[i*4+1] = px[i*4+2] = v; px[i*4+3] = 255; }
+    ctx.putImageData(id, 0, 0);
+    $("attach-img").src = cv.toDataURL();
+    $("attach-preview").classList.remove("hidden");
+    URL.revokeObjectURL(url);
+  };
+  im.onerror = () => { $("attach-name").textContent = file.name + " (not a readable image)"; };
+  im.src = url;
+}
+
+// --------------------------------------------------------------- WebSocket -
+let ws = null;
+function setLink(up) {
+  const el = $("link-state");
+  el.textContent = up ? "UP" : "DOWN";
+  el.className = "pill " + (up ? "on" : "off");
+}
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => setLink(true);
+  ws.onclose = () => { setLink(false); setTimeout(() => { if (ME) connectWS(); }, 2500); };
+  ws.onmessage = async (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "fax") await onIncomingFax(m);
+  };
+}
+
+// ------------------------------------------------------------- WebUSB ------
+let usb = null; // { device, iface, endpoint }
+const seen = new Set();      // fax ids already handled
+const queue = [];            // faxes waiting for a printer to bind
+
+async function onIncomingFax(m) {
+  if (seen.has(m.id)) { ackFax(m.id); return; }
+  seen.add(m.id);
+  queue.push(m);
+  await flushQueue();
+  // reflect in inbox live
+  await refreshLogs();
+  const box = $("inbox"); box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash");
+}
+
+async function flushQueue() {
+  if (!usb && !window.__forcePrintFallback) {
+    $("printer-msg").className = "msg warn";
+    $("printer-msg").textContent = `» ${queue.length} fax(es) waiting — bind a printer to print`;
+    return;
+  }
+  while (queue.length) {
+    const m = queue[0];
+    let ok = false;
+    try {
+      const bytes = b64ToBytes(m.escpos_b64);
+      if (usb) { await usbWrite(bytes); ok = true; }
+      else { printFallback(m); ok = true; }
+    } catch (err) {
+      $("printer-msg").className = "msg err";
+      $("printer-msg").textContent = "✗ print failed: " + err.message;
+      break;
+    }
+    if (ok) { queue.shift(); ackFax(m.id); }
+  }
+}
+
+function ackFax(id) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ack", fax_id: id }));
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+function setPrinter(state, cls) {
+  const el = $("printer-state");
+  el.textContent = state; el.className = "pill " + cls;
+}
+
+$("connect-usb").onclick = async () => {
+  if (!("usb" in navigator)) {
+    $("printer-msg").className = "msg err";
+    $("printer-msg").textContent = "✗ WebUSB unsupported. Use Chrome/Edge over HTTPS or localhost, or use 'test page' → browser print.";
+    window.__forcePrintFallback = true;
+    return;
+  }
+  try {
+    const device = await navigator.usb.requestDevice({ filters: [] });
+    await device.open();
+    if (device.configuration === null) await device.selectConfiguration(1);
+    // find an interface with a bulk/interrupt OUT endpoint (prefer printer class 7)
+    let chosen = null;
+    for (const iface of device.configuration.interfaces) {
+      const alt = iface.alternates[0];
+      const out = alt.endpoints.find((e) => e.direction === "out");
+      if (out) {
+        chosen = { number: iface.interfaceNumber, endpoint: out.endpointNumber,
+                   isPrinter: alt.interfaceClass === 7 };
+        if (alt.interfaceClass === 7) break;
+      }
+    }
+    if (!chosen) throw new Error("no OUT endpoint found on this device");
+    await device.claimInterface(chosen.number);
+    usb = { device, iface: chosen.number, endpoint: chosen.endpoint };
+    setPrinter("ONLINE", "on");
+    $("print-test").disabled = false;
+    $("printer-msg").className = "msg ok";
+    $("printer-msg").textContent = `✓ bound to ${device.productName || "printer"} (if#${chosen.number} ep#${chosen.endpoint})`;
+    await flushQueue();
+  } catch (err) {
+    const pm = $("printer-msg");
+    if (err.name === "NotFoundError") {
+      // user closed the picker, or no USB printer on THIS machine
+      pm.className = "msg info";
+      pm.innerHTML = "◦ no printer selected. WebUSB binds a printer plugged into <b>this computer</b> " +
+        "(the one you're browsing on). To print on a remote/host printer, just fax that callsign — " +
+        "it prints there automatically.";
+    } else if (String(err).toLowerCase().includes("claim") || err.name === "SecurityError") {
+      pm.className = "msg err";
+      pm.innerHTML = "✗ " + escapeHtml(err.message) +
+        " — the OS/driver is holding this printer. On Linux: <code>sudo modprobe -r usblp</code> " +
+        "then retry (note: that disables the host's local-bridge printing).";
+    } else {
+      pm.className = "msg err";
+      pm.textContent = "✗ " + err.message;
+    }
+  }
+};
+
+async function usbWrite(bytes) {
+  // chunk to be safe on small controllers
+  const CH = 4096;
+  for (let i = 0; i < bytes.length; i += CH) {
+    await usb.device.transferOut(usb.endpoint, bytes.slice(i, i + CH));
+  }
+}
+
+$("print-test").onclick = async () => {
+  const bytes = new TextEncoder().encode(
+    "\x1b@\x1ba\x01\x1b!\x38FAXXME\x1b!\x00\nself-test OK\n\n\n\n\x1dV\x00");
+  try { await usbWrite(bytes); $("printer-msg").className = "msg ok"; $("printer-msg").textContent = "✓ test page sent"; }
+  catch (err) { $("printer-msg").className = "msg err"; $("printer-msg").textContent = "✗ " + err.message; }
+};
+
+// browser-print fallback for non-USB / unsupported printers
+function printFallback(m) {
+  const w = window.open("", "_blank", "width=380,height=600");
+  if (!w) throw new Error("popup blocked");
+  const t = new Date(m.created_at * 1000).toLocaleString();
+  const imgTag = m.image_b64
+    ? `<img src="${m.image_b64}" style="width:100%;image-rendering:pixelated;margin:6px 0">` : "";
+  w.document.write(`<pre style="font:14px monospace;white-space:pre-wrap;width:300px">` +
+    `        F A X X M E\n= incoming transmission =\n--------------------------------\n` +
+    `FROM: ${escapeHtml(m.from)} @${escapeHtml(m.from_username)}\n` +
+    `TIME: ${t}\n--------------------------------\n${escapeHtml(m.body)}\n</pre>` +
+    imgTag +
+    `<pre style="font:14px monospace;width:300px">--------------------------------\n     .: end of message :.</pre>`);
+  w.document.close(); w.focus(); setTimeout(() => w.print(), 200);
+}
+function escapeHtml(s) { return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+// periodic presence refresh
+setInterval(() => { if (ME) refreshUsers(); }, 10000);
+
+boot();

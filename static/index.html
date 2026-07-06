@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FaxxMe // terminal</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <pre class="banner"> ______   _______  __   __  __   __  __   __  _______
+|      | |   _   ||  |_|  ||  |_|  ||  |_|  ||       |
+|   ___| |  |_|  ||       ||       ||       ||    ___|
+|  |___  |       ||       ||       ||       ||   |___
+|   ___| |       | |     |  |     |  |     | |    ___|
+|  |     |   _   || _   _ || _   _ || _   _ ||   |___
+|__|     |__| |__||__| |__||__| |__||__| |__||_______|</pre>
+  <p class="tag">// analog ghosts on a digital wire &mdash; fax your friends over the net &mdash; v0.1</p>
+
+  <!-- BOOT -->
+  <section id="boot"><div id="bootlog"></div></section>
+
+  <!-- AUTH -->
+  <section id="auth" class="hidden">
+    <hr>
+    <div class="row">
+      <button id="tab-login" class="ghost">[ LOGIN ]</button>
+      <button id="tab-register" class="ghost">[ REGISTER ]</button>
+    </div>
+
+    <form id="login-form" class="hidden">
+      <div class="field">
+        <label for="login-user">callsign</label>
+        <div class="prompt-line"><input id="login-user" autocomplete="username" placeholder="e.g. neo"></div>
+      </div>
+      <div class="field">
+        <label for="login-pass">passphrase</label>
+        <div class="prompt-line"><input id="login-pass" type="password" autocomplete="current-password"></div>
+      </div>
+      <div class="msg" id="login-msg"></div>
+      <button type="submit">CONNECT &raquo;</button>
+    </form>
+
+    <form id="register-form" class="hidden">
+      <div class="field">
+        <label for="reg-user">callsign <span class="small">(2-24, a-z 0-9 _)</span></label>
+        <div class="prompt-line"><input id="reg-user" autocomplete="username" placeholder="pick a handle"></div>
+      </div>
+      <div class="field">
+        <label for="reg-name">display name</label>
+        <div class="prompt-line"><input id="reg-name" placeholder="what friends see"></div>
+      </div>
+      <div class="field">
+        <label for="reg-pass">passphrase <span class="small">(min 4)</span></label>
+        <div class="prompt-line"><input id="reg-pass" type="password" autocomplete="new-password"></div>
+      </div>
+      <div class="msg" id="reg-msg"></div>
+      <button type="submit">REGISTER &raquo;</button>
+    </form>
+  </section>
+
+  <!-- CONSOLE -->
+  <section id="console" class="hidden">
+    <div class="statusbar">
+      <div>Welcome, <span class="on" id="who">--</span></div>
+      <div>PRINTER: <span class="pill off" id="printer-state">OFFLINE</span></div>
+      <div>LINK: <span class="pill off" id="link-state">DOWN</span></div>
+      <div><button id="logout" class="ghost">[ LOGOUT ]</button></div>
+    </div>
+
+    <h2>:: PRINTER LINK</h2>
+    <div class="row">
+      <button id="connect-usb">▸ CONNECT USB PRINTER</button>
+      <button id="print-test" class="ghost" disabled>test page</button>
+    </div>
+    <div class="msg info" id="printer-msg"></div>
+    <p class="small block" id="local-note"></p>
+
+    <h2>:: COMPOSE FAX</h2>
+    <form id="fax-form" autocomplete="off">
+      <div class="field">
+        <label for="fax-to">to — callsign</label>
+        <div class="combo">
+          <div class="prompt-line"><input id="fax-to" placeholder="type to search friends…"
+               autocomplete="off" role="combobox" aria-autocomplete="list"
+               aria-expanded="false" aria-controls="user-dropdown"></div>
+          <div id="user-dropdown" class="dropdown hidden" role="listbox"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="fax-body">message</label>
+        <textarea id="fax-body" maxlength="200"
+                  placeholder="type your transmission... (optional if you attach an image)"></textarea>
+        <div class="counter" id="body-count">0 / 200</div>
+      </div>
+
+      <div class="field">
+        <label for="fax-image">attach image <span class="small">— dithered to halftone, optional</span></label>
+        <input type="file" id="fax-image" accept="image/*">
+        <div class="attach-row">
+          <button type="button" id="attach-btn" class="ghost">▚ CHOOSE IMAGE</button>
+          <button type="button" id="attach-clear" class="ghost hidden">✕ remove</button>
+          <span class="small" id="attach-name"></span>
+        </div>
+        <div id="attach-preview" class="hidden">
+          <div class="small">halftone preview</div>
+          <img id="attach-img" alt="halftone preview">
+        </div>
+      </div>
+
+      <div class="submit-row">
+        <button type="submit" id="transmit-btn" disabled>TRANSMIT »</button>
+        <span class="msg" id="fax-msg"></span>
+      </div>
+    </form>
+
+    <h2>:: INBOX <span class="small">(received · keeps latest 50)</span>
+      <button type="button" id="clear-inbox" class="ghost tiny hidden">✕ clear</button></h2>
+    <div class="log" id="inbox"></div>
+
+    <h2>:: OUTBOX <span class="small">(sent · keeps latest 50)</span>
+      <button type="button" id="clear-outbox" class="ghost tiny hidden">✕ clear</button></h2>
+    <div class="log" id="outbox"></div>
+  </section>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

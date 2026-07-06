@@ -1,0 +1,14 @@
+# runtime data / local state
+*.db
+*.db-shm
+*.db-wal
+.faxxme_secret
+
+# logs
+*.log
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
