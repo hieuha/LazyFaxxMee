@@ -78,6 +78,18 @@ The local bridge writes to `/dev/usb/lp0`, owned `root:lp`. This repo's setup ad
 rule (`/etc/udev/rules.d/99-faxxme-printer.rules`, `MODE=0666`) and put `pi` in the `lp`
 group so the server can print without root.
 
+## Run as a service (systemd)
+
+Deploy on a host so it starts on boot and you can manage it with `systemctl`:
+
+```bash
+sudo deploy/install.sh          # venv + deps, printer udev rule, systemd unit
+systemctl status faxxme
+journalctl -u faxxme -f          # logs
+```
+
+See [deploy/README.md](deploy/README.md) for stop/start/config/uninstall.
+
 ## Test
 
 ```bash

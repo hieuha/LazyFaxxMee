@@ -1,0 +1,5 @@
+# FaxxMe — let a normal user (in group "lp") write to USB line printers.
+# Thermal receipt printers show up as /dev/usb/lp* (usbmisc). Without this the
+# node is root:lp 0660 and the service can't print.
+KERNEL=="lp[0-9]*", SUBSYSTEM=="usbmisc", GROUP="lp", MODE="0666"
+ACTION=="add", SUBSYSTEM=="usbmisc", KERNEL=="lp*", GROUP="lp", MODE="0666"

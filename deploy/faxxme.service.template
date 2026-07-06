@@ -1,0 +1,21 @@
+[Unit]
+Description=FaxxMe — fax your friends over the net to a real thermal printer
+Documentation=https://github.com/hieuha/LazyFaxxMee
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+WorkingDirectory=@PROJECT_DIR@
+EnvironmentFile=@DEPLOY_DIR@/faxxme.env
+ExecStart=@PROJECT_DIR@/.venv/bin/python -m faxxme
+Restart=on-failure
+RestartSec=3
+# needed to write to the USB thermal printer at /dev/usb/lp*
+SupplementaryGroups=lp
+# light hardening
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
