@@ -43,6 +43,12 @@ def _wrap(text: str, width: int) -> list[str]:
     return out
 
 
+def _unicode_raster(text: str) -> bytes:
+    """A non-ASCII text line rendered via a Unicode font, left-aligned, as an ESC/POS raster."""
+    from . import imaging
+    return ESC + b"a" + b"\x00" + imaging.text_raster(text) + b"\n"
+
+
 def build_receipt(sender_display: str, sender_username: str, body: str,
                   created_at: float, width: int = LOCAL_WIDTH,
                   image_escpos: bytes | None = None) -> bytes:
@@ -58,16 +64,23 @@ def build_receipt(sender_display: str, sender_username: str, body: str,
     d += b"-" * width + b"\n"
     d += ESC + b"a" + b"\x00"            # left
     from_line = f"FROM: {sender_display} @{sender_username}"
-    if len(from_line) > width:           # keep it to one line on narrow paper
-        from_line = from_line[:width]
-    d += (from_line + "\n").encode("ascii", "replace")
+    if from_line.isascii():
+        d += (from_line[:width] + "\n").encode("ascii", "replace")
+    else:                                # a name with diacritics -> render as raster
+        d += _unicode_raster(from_line)
     d += f"TIME: {ts}\n".encode("ascii", "replace")
     d += b"-" * width + b"\n"
     if body:
-        d += ESC + b"!" + b"\x08"        # emphasized body
-        for line in _wrap(body, width):
-            d += (line + "\n").encode("ascii", "replace")
-        d += ESC + b"!" + b"\x00"
+        for para in body.replace("\r\n", "\n").split("\n"):
+            if para == "":
+                d += b"\n"
+            elif para.isascii():         # fast, crisp native ESC/POS text
+                d += ESC + b"!" + b"\x08"
+                for line in _wrap(para, width):
+                    d += (line + "\n").encode("ascii", "replace")
+                d += ESC + b"!" + b"\x00"
+            else:                        # Vietnamese / emoji / any Unicode -> font raster
+                d += _unicode_raster(para)
     if image_escpos:
         d += ESC + b"a" + b"\x01"        # center the image
         d += image_escpos

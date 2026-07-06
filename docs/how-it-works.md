@@ -112,6 +112,12 @@ TIME: YYYY-MM-DD HH:MM:SS
 <feed / cut per FAXXME_CUT>
 ```
 
+**Unicode text.** Thermal printers only know a legacy code page, so Vietnamese/emoji can't be
+sent as bytes. `build_receipt` checks each line: **ASCII** stays fast native ESC/POS text;
+anything else (a body line, or a sender name with diacritics) is rendered with a bundled font
+(`FAXXME_FONT`, DejaVu Mono Bold) and printed as a **crisp thresholded `GS v 0` raster**
+(`imaging.text_raster`) — not dithered, so the strokes stay solid.
+
 ## Image attachments
 
 Optional. On the client you pick an image and see a **live Floyd–Steinberg preview**

@@ -9,11 +9,14 @@ frontend. A fax prints on the recipient's physical thermal printer via any of **
 their **browser** (WebUSB), a printer wired into the **server host** (local bridge), or a headless
 **agent on their own Raspberry Pi** (printer node, authenticated with a device token).
 
-```
-                                  ┌─ recipient's browser ───WebUSB──▶ 🖨
- sender ─POST /api/fax─▶  FAXXME ─┼─ host local bridge ────────────▶ 🖨 /dev/usb/lp0
-                        (FastAPI)  └─ their Pi agent (device token)─▶ 🖨 /dev/usb/lp0
-                            │  offline → queue (SQLite) → flush on reconnect / hot-replug
+```mermaid
+flowchart LR
+    S["sender<br/>POST /api/fax"] --> F(["FAXXME server<br/>FastAPI"])
+    F -- "WebSocket push" --> B["recipient's browser<br/>WebUSB → printer"]
+    F -- "host local bridge" --> H["host printer<br/>/dev/usb/lp0"]
+    F -- "their Pi agent · device token" --> A["Pi node printer<br/>/dev/usb/lp0"]
+    F -. "offline" .-> Q[("SQLite queue")]
+    Q -. "flush on reconnect / hot-replug" .-> F
 ```
 
 ## Screenshots
@@ -33,6 +36,7 @@ their **browser** (WebUSB), a printer wired into the **server host** (local brid
   - *Printer node (agent)* — a headless [agent](agent/README.md) on the recipient's own Raspberry Pi, authenticated with a **device token**, prints faxes locally.
 - **Device tokens** — per-account API token for the agent (sha256-hashed, shown once); regenerate to **revoke instantly** (the connected agent is kicked).
 - **Live printer status** — the PRINTER pill shows the best available path (`ONLINE` browser USB · `NODE ✓` agent · `WIRED` bridge · `OFFLINE`) and updates in real time; **TEST** prints a test page on whichever you have.
+- **Unicode text** — lines with Vietnamese, emoji, or anything the printer's code page can't show are auto-rendered with a bundled font as a crisp `GS v 0` raster; pure-ASCII lines stay fast native ESC/POS text.
 - **Image attachments** — Floyd–Steinberg dithered to 1-bit halftone (`GS v 0` raster), with a live client-side preview.
 - **Offline queue** — undelivered faxes wait in SQLite and flush when the recipient (browser/agent) reconnects, or when the host printer is hot-replugged (background watcher); the sender's outbox flips `queued → printed` live.
 - **Printed-receipt modal** — click any fax to see it as a paper slip (torn edges, dithered image).
@@ -93,6 +97,9 @@ All configuration is via environment variables:
 | `FAXXME_PRINT_DOTS` | `384` | image raster width in dots (58mm ≈ 384, 80mm ≈ 576) |
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
+| `FAXXME_FONT` | bundled DejaVu Mono Bold | TTF used to render non-ASCII text (Vietnamese, emoji…) |
+| `FAXXME_FONT_SIZE` | `28` | font size for rendered Unicode text |
+| `FAXXME_FONT_THRESHOLD` | `170` | black/white cutoff for rendered text (higher = darker/bolder) |
 | `FAXXME_DB` / `FAXXME_SECRET` | in repo | sqlite + session-secret paths |
 
 ## API
@@ -197,7 +204,8 @@ faxxme/app.py        FastAPI app: auth, fax routing, presence, WS delivery, prin
 faxxme/db.py         SQLite (stdlib) — users (+ device-token hash) + faxes (+ dithered image BLOB)
 faxxme/auth.py       pbkdf2 passwords + hmac session cookies + device tokens (no native deps)
 faxxme/printer.py    ESC/POS receipt builder + auto-cut + local /dev printer bridge
-faxxme/imaging.py    image → Floyd–Steinberg halftone → GS v 0 raster (Pillow)
+faxxme/imaging.py    image → halftone raster + Unicode text → crisp raster (Pillow)
+faxxme/fonts/        bundled DejaVu Sans Mono Bold (renders Vietnamese/emoji)
 static/              CRT terminal UI (index.html, style.css, app.js — WebUSB + WebSocket)
 agent/               printer-node agent for a Raspberry Pi (faxxme_agent.py, systemd, install)
 tests/test_api.py    end-to-end tests

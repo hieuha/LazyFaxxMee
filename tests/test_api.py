@@ -301,3 +301,11 @@ def test_test_print_routes_to_agent():
         fax = agent.receive_json()
         assert fax["type"] == "fax"
         assert b"TEST PRINT" in base64.b64decode(fax["escpos_b64"])
+
+
+def test_unicode_body_renders_as_raster():
+    from faxxme import printer
+    vn = printer.build_receipt("Bob", "bob", "Chào bạn — tiếng Việt!", 1700000000.0)
+    assert b"\x1dv0" in vn                       # Vietnamese line -> GS v 0 raster
+    a = printer.build_receipt("Bob", "bob", "hello world", 1700000000.0)
+    assert b"hello world" in a and b"\x1dv0" not in a   # ASCII stays native text
