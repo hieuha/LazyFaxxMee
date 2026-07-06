@@ -143,6 +143,21 @@ the box; to print on the *container host's* wired printer, set `FAXXME_LOCAL_USE
 the `devices` + `group_add` block in `docker-compose.yml`. USB hotplug is awkward in containers —
 for a host-attached printer the systemd deploy is smoother.
 
+## Printer node (Raspberry Pi agent)
+
+Can't bind a printer through the browser (macOS/Windows) — or just want a dedicated,
+always-on printer? Run the **agent** on a Raspberry Pi with the printer attached. It signs
+in with your callsign + a **device token** (web UI: `:: PRINTER NODE → GENERATE TOKEN`,
+regenerate to revoke) and prints every fax addressed to you — no browser needed.
+
+```bash
+sudo agent/install.sh
+sudoedit agent/faxxme-agent.env    # set FAXXME_SERVER, callsign, token
+sudo systemctl restart faxxme-agent
+```
+
+Full guide: [agent/README.md](agent/README.md).
+
 ## Run as a service (systemd)
 
 ```bash

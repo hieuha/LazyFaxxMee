@@ -7,8 +7,9 @@
 # logs
 *.log
 
-# host-specific service config (generated from deploy/faxxme.env.example)
+# host-specific service config (generated from *.env.example)
 deploy/faxxme.env
+agent/faxxme-agent.env
 
 # python
 .venv/

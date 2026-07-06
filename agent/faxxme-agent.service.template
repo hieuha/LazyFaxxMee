@@ -1,0 +1,19 @@
+[Unit]
+Description=FaxxMe printer agent — prints faxes for this account on the local printer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUN_USER@
+WorkingDirectory=@AGENT_DIR@
+EnvironmentFile=@AGENT_DIR@/faxxme-agent.env
+ExecStart=@AGENT_DIR@/.venv/bin/python @AGENT_DIR@/faxxme_agent.py
+Restart=always
+RestartSec=3
+# needed to write to the USB thermal printer at /dev/usb/lp*
+SupplementaryGroups=lp
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

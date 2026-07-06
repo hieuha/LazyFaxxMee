@@ -111,12 +111,39 @@ async function enterConsole(m) {
       "▲ <b>this host has a printer wired in.</b> Faxes to @" + ME.username +
       " print here automatically — even with no browser open. You don't need to \"Connect USB\".";
   }
+  initTokenUI(m.has_token);
   await refreshUsers();
   await refreshLogs();
   updateComposeState();
   connectWS();
   autoBindPrinter();   // re-bind a previously-authorized USB printer, no click needed
 }
+
+// ---- device token for the headless printer agent ----
+function initTokenUI(hasToken) {
+  $("gen-token").textContent = hasToken ? "REGENERATE TOKEN" : "GENERATE TOKEN";
+  $("token-status").textContent = hasToken ? "a device token is active" : "no token yet";
+}
+$("gen-token").onclick = async () => {
+  const regen = $("gen-token").textContent.startsWith("REGEN");
+  if (regen && !(await confirmBox(
+      "Regenerate device token? The current one stops working immediately — any Pi agent using it must be updated.",
+      { title: "regenerate token", ok: "REGENERATE" }))) return;
+  try {
+    const d = await api("/api/token/regenerate", { method: "POST" });
+    $("token-value").textContent = d.token;
+    $("token-reveal").classList.remove("hidden");
+    $("gen-token").textContent = "REGENERATE TOKEN";
+    $("token-status").textContent = "token active — any previous token revoked";
+  } catch (err) { $("token-status").className = "small"; $("token-status").textContent = "✗ " + err.message; }
+};
+$("token-copy").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($("token-value").textContent);
+    $("token-copy").textContent = "copied ✓";
+    setTimeout(() => { $("token-copy").textContent = "copy"; }, 1500);
+  } catch (_) { /* clipboard blocked on http — user can select manually */ }
+};
 
 // ---- recipient combobox (searchable, scales to many friends) ----
 let ALL_USERS = [];

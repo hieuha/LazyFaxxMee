@@ -224,7 +224,18 @@ async def me(request: Request):
         "user": _public(user),
         "printer_online": presence.online(user["id"]),
         "local_bridge": user["username"] == printer.LOCAL_USER and printer.local_available(),
+        "has_token": bool(user.get("token_hash")),
     }
+
+
+@app.post("/api/token/regenerate")
+async def regenerate_token(request: Request):
+    """Issue a fresh device/API token for the printer agent (shown once). Regenerating
+    immediately revokes the previous token."""
+    user = require_user(request)
+    token = auth.new_device_token()
+    db.set_user_token(user["id"], auth.hash_token(token))
+    return {"ok": True, "username": user["username"], "token": token}
 
 
 @app.get("/api/users")
@@ -320,10 +331,23 @@ async def clear_outbox_ep(request: Request):
 # --------------------------------------------------------------------------- #
 #  WebSocket: presence + live delivery                                          #
 # --------------------------------------------------------------------------- #
+def _ws_authenticate(ws: WebSocket) -> dict | None:
+    """A WebSocket may authenticate as a browser (session cookie) or as a headless printer
+    agent (device token via `Authorization: Bearer <token>` + `X-Faxxme-User: <callsign>`)."""
+    authz = ws.headers.get("authorization", "")
+    uname = ws.headers.get("x-faxxme-user")
+    if authz.lower().startswith("bearer ") and uname:
+        token = authz.split(" ", 1)[1].strip()
+        u = db.get_user_by_token_hash(uname.strip().lower(), auth.hash_token(token))
+        if u:
+            return u
+    uid = auth.read_token(ws.cookies.get(auth.COOKIE_NAME))
+    return db.get_user(uid) if uid else None
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
-    uid = auth.read_token(ws.cookies.get(auth.COOKIE_NAME))
-    user = db.get_user(uid) if uid else None
+    user = _ws_authenticate(ws)
     if not user:
         await ws.close(code=4401)
         return

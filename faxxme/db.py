@@ -29,7 +29,8 @@ def init() -> None:
                 display_name TEXT NOT NULL,
                 pass_hash    TEXT NOT NULL,
                 salt         TEXT NOT NULL,
-                created_at   REAL NOT NULL
+                created_at   REAL NOT NULL,
+                token_hash   TEXT              -- sha256 of the device/API token, or NULL
             );
             CREATE TABLE IF NOT EXISTS faxes (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +56,9 @@ def init() -> None:
                           ("recipient_deleted", "INTEGER NOT NULL DEFAULT 0")):
             if name not in have:
                 _conn.execute(f"ALTER TABLE faxes ADD COLUMN {name} {ddl}")
+        have_u = {r[1] for r in _conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "token_hash" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN token_hash TEXT")
         _conn.commit()
 
 
@@ -90,6 +94,21 @@ def get_user_by_name(username: str) -> dict | None:
     with _lock:
         row = _c().execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         return dict(row) if row else None
+
+
+def set_user_token(user_id: int, token_hash: str) -> None:
+    with _lock:
+        _c().execute("UPDATE users SET token_hash=? WHERE id=?", (token_hash, user_id))
+        _c().commit()
+
+
+def get_user_by_token_hash(username: str, token_hash: str) -> dict | None:
+    import hmac
+    with _lock:
+        row = _c().execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if not row or not row["token_hash"]:
+            return None
+        return dict(row) if hmac.compare_digest(row["token_hash"], token_hash) else None
 
 
 def list_users() -> list[dict]:

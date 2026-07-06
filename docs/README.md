@@ -6,6 +6,8 @@
   work well, paper-width and auto-cut config, and caveats.
 - **[Platform notes](platforms.md)** — what to watch out for with WebUSB on
   Ubuntu/Linux, macOS, and Windows.
+- **[Printer node / agent](../agent/README.md)** — run FaxxMe on your own Raspberry Pi so
+  faxes to you print there, authenticated with a device token (no browser needed).
 
 For install/run/deploy see the main [README](../README.md) and
 [deploy/README.md](../deploy/README.md).

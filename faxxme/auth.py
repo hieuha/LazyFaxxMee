@@ -49,6 +49,18 @@ def make_token(user_id: int) -> str:
         base64.urlsafe_b64encode(sig).decode().rstrip("=")
 
 
+# ---- device tokens (for the headless printer agent) ----
+
+def new_device_token() -> str:
+    """A fresh high-entropy API token, shown to the user once."""
+    return secrets.token_urlsafe(32)
+
+
+def hash_token(token: str) -> str:
+    """Store/compare device tokens as sha256 (they're high-entropy, so no slow KDF needed)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def read_token(token: str | None) -> int | None:
     if not token or "." not in token:
         return None

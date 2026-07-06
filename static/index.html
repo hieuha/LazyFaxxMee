@@ -121,6 +121,17 @@
     <h2>:: OUTBOX <span class="small">(sent · keeps latest 50)</span>
       <button type="button" id="clear-outbox" class="ghost tiny hidden">✕ clear</button></h2>
     <div class="log" id="outbox"></div>
+
+    <h2>:: PRINTER NODE <span class="small">(run FaxxMe on your own Pi)</span></h2>
+    <div class="row">
+      <button type="button" id="gen-token" class="ghost">GENERATE TOKEN</button>
+      <span class="small" id="token-status"></span>
+    </div>
+    <div id="token-reveal" class="hidden">
+      <label>device token <span class="small">— shown once, copy it now</span></label>
+      <div class="token-box"><code id="token-value"></code>
+        <button type="button" id="token-copy" class="ghost tiny">copy</button></div>
+    </div>
   </section>
 </div>
 
