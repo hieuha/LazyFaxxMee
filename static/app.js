@@ -115,6 +115,7 @@ async function enterConsole(m) {
   await refreshLogs();
   updateComposeState();
   connectWS();
+  autoBindPrinter();   // re-bind a previously-authorized USB printer, no click needed
 }
 
 // ---- recipient combobox (searchable, scales to many friends) ----
@@ -478,26 +479,19 @@ function setPrinter(state, cls) {
   el.textContent = state; el.className = "pill " + cls;
 }
 
-$("connect-usb").onclick = async () => {
-  if (!("usb" in navigator)) {
-    $("printer-msg").className = "msg err";
-    $("printer-msg").textContent = "✗ WebUSB unsupported. Use Chrome/Edge over HTTPS or localhost, or use 'test page' → browser print.";
-    window.__forcePrintFallback = true;
-    return;
-  }
+// Bind a USB device as the printer. announce=true surfaces detailed errors (manual click);
+// announce=false is used for silent auto-(re)binding on page load / hot-replug.
+async function bindDevice(device, { announce = true } = {}) {
   try {
-    const device = await navigator.usb.requestDevice({ filters: [] });
     await device.open();
     if (device.configuration === null) await device.selectConfiguration(1);
-    // find an interface with a bulk/interrupt OUT endpoint (prefer printer class 7)
     let chosen = null;
     for (const iface of device.configuration.interfaces) {
       const alt = iface.alternates[0];
       const out = alt.endpoints.find((e) => e.direction === "out");
       if (out) {
-        chosen = { number: iface.interfaceNumber, endpoint: out.endpointNumber,
-                   isPrinter: alt.interfaceClass === 7 };
-        if (alt.interfaceClass === 7) break;
+        chosen = { number: iface.interfaceNumber, endpoint: out.endpointNumber };
+        if (alt.interfaceClass === 7) break;   // prefer the printer-class interface
       }
     }
     if (!chosen) throw new Error("no OUT endpoint found on this device");
@@ -507,7 +501,57 @@ $("connect-usb").onclick = async () => {
     $("print-test").disabled = false;
     $("printer-msg").className = "msg ok";
     $("printer-msg").textContent = `✓ bound to ${device.productName || "printer"} (if#${chosen.number} ep#${chosen.endpoint})`;
-    await flushQueue();
+    await flushQueue();          // print anything that queued while it was unbound
+    return true;
+  } catch (err) {
+    if (announce) throw err;
+    try { await device.close(); } catch (_) {}
+    return false;
+  }
+}
+
+function unbindPrinter() {
+  usb = null;
+  setPrinter("OFFLINE", "off");
+  $("print-test").disabled = true;
+}
+
+// Re-bind a printer the user already granted — no click needed (WebUSB permission persists).
+async function autoBindPrinter() {
+  if (!("usb" in navigator) || usb) return;
+  try {
+    for (const d of await navigator.usb.getDevices()) {
+      if (await bindDevice(d, { announce: false })) return;
+    }
+  } catch (_) {}
+}
+
+if ("usb" in navigator) {
+  // printer plugged back in → auto-rebind and flush the queue, no CONNECT click
+  navigator.usb.addEventListener("connect", async (e) => {
+    if (!usb) await bindDevice(e.device, { announce: false });
+  });
+  // printer unplugged → mark offline; the connect handler will resume when it returns
+  navigator.usb.addEventListener("disconnect", (e) => {
+    if (usb && e.device === usb.device) {
+      unbindPrinter();
+      $("printer-msg").className = "msg warn";
+      $("printer-msg").textContent =
+        "◦ printer unplugged — it auto-reconnects and prints any waiting faxes when you plug it back in";
+    }
+  });
+}
+
+$("connect-usb").onclick = async () => {
+  if (!("usb" in navigator)) {
+    $("printer-msg").className = "msg err";
+    $("printer-msg").textContent = "✗ WebUSB unsupported. Use Chrome/Edge over HTTPS or localhost, or use 'test page' → browser print.";
+    window.__forcePrintFallback = true;
+    return;
+  }
+  try {
+    const device = await navigator.usb.requestDevice({ filters: [] });
+    await bindDevice(device);   // announce=true → detailed errors handled below
   } catch (err) {
     const pm = $("printer-msg");
     if (err.name === "NotFoundError") {

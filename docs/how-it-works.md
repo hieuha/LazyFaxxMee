@@ -63,6 +63,11 @@ A queued fax leaves the queue when:
 
 The watcher also runs once at startup, so a reboot flushes anything queued.
 
+On the **browser/WebUSB** side there's a client-side equivalent: WebUSB permission persists,
+so FaxxMe re-binds a previously-authorized printer automatically on page load, and listens
+for USB `connect`/`disconnect` events — unplug/replug the printer and it re-binds and prints
+the waiting faxes on its own, no *CONNECT PRINTER* click needed.
+
 ## One source of truth: server-side ESC/POS
 
 The receipt bytes are always built on the server (`printer.build_receipt`). The browser
