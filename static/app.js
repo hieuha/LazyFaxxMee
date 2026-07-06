@@ -327,9 +327,10 @@ function confirmBox(message, { title = "confirm", ok = "CONFIRM", cancel = "CANC
 
 // ---- receipt modal: render a fax exactly like the printed paper slip ----
 function openReceipt(f, dir) {
-  const from = dir === "in"
-    ? { name: f.sender_display, user: f.sender_name }
-    : { name: ME.display_name, user: ME.username };  // outbox: the slip printed on their end shows YOU
+  // inbox: who it's FROM; outbox: who you sent it TO
+  const label = dir === "in"
+    ? `FROM: ${f.sender_display} @${f.sender_name}`
+    : `TO:   ${f.recipient_display} @${f.recipient_name}`;
   const stamp = fmtStamp(f.created_at);
   const rule = "-".repeat(32);
   const imgTag = f.has_image ? `<img class="r-img" src="/api/fax/${f.id}/image" alt="fax image">` : "";
@@ -351,7 +352,7 @@ function openReceipt(f, dir) {
        </div>
        <button type="button" class="ghost r-close">✕ close</button>
      </div>`;
-  overlay.querySelector(".r-from").textContent = `FROM: ${from.name} @${from.user}`;
+  overlay.querySelector(".r-from").textContent = label;
   overlay.querySelector(".r-time").textContent = `TIME: ${stamp}`;
   overlay.querySelector(".r-body").textContent = f.body || "";
   if (!f.body) overlay.querySelector(".r-body").classList.add("hidden");
