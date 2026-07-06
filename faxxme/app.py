@@ -16,6 +16,24 @@ from . import auth, db, imaging, printer
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 PRINTER_POLL = float(os.environ.get("FAXXME_PRINTER_POLL", "4"))  # seconds between printer checks
 
+# per-sender fax rate limit (anti-spam so nobody floods a friend's paper roll)
+FAX_RATE_MAX = int(os.environ.get("FAXXME_FAX_RATE_MAX", "20"))         # max faxes per window (0 = off)
+FAX_RATE_WINDOW = float(os.environ.get("FAXXME_FAX_RATE_WINDOW", "60"))  # window, seconds
+_fax_hits: dict[int, list[float]] = {}
+
+
+def _rate_ok(user_id: int) -> bool:
+    """Sliding-window rate check per sender; records a hit when allowed."""
+    if FAX_RATE_MAX <= 0:
+        return True
+    now = time.monotonic()
+    hits = [t for t in _fax_hits.get(user_id, ()) if now - t < FAX_RATE_WINDOW]
+    ok = len(hits) < FAX_RATE_MAX
+    if ok:
+        hits.append(now)
+    _fax_hits[user_id] = hits
+    return ok
+
 
 @asynccontextmanager
 async def lifespan(_app: "FastAPI"):
@@ -289,6 +307,8 @@ async def users(request: Request):
 async def send_fax(request: Request, to: str = Form(""), body: str = Form(""),
                    image: UploadFile | None = File(None)):
     sender = require_user(request)
+    if not _rate_ok(sender["id"]):
+        raise HTTPException(429, f"slow down — max {FAX_RATE_MAX} faxes per {int(FAX_RATE_WINDOW)}s")
     to = to.strip().lower()
     if not to:
         raise HTTPException(400, "pick a recipient callsign")

@@ -97,6 +97,7 @@ All configuration is via environment variables:
 | `FAXXME_PRINT_DOTS` | `384` | image raster width in dots (58mm ≈ 384, 80mm ≈ 576) |
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
+| `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | per-sender rate limit: max faxes per N seconds (0 = off) |
 | `FAXXME_FONT` | bundled Play (Google Fonts) | TTF used to render non-ASCII text (Vietnamese, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | font size for rendered Unicode text |
 | `FAXXME_FONT_THRESHOLD` | `176` | black/white cutoff for rendered text (higher = darker) |

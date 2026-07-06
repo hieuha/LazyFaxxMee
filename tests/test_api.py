@@ -8,6 +8,7 @@ os.environ["FAXXME_SECRET"] = tempfile.mktemp(suffix=".secret")
 _printfile = tempfile.mktemp(suffix=".prn")
 os.environ["FAXXME_PRINTER_DEV"] = _printfile
 os.environ["FAXXME_LOCAL_USER"] = "bob"  # bob has the wired-in printer
+os.environ["FAXXME_FAX_RATE_MAX"] = "0"  # rate limit off by default; one test enables it
 
 from fastapi.testclient import TestClient  # noqa: E402
 from faxxme import app as appmod, printer  # noqa: E402
@@ -309,3 +310,16 @@ def test_unicode_body_renders_as_raster():
     assert b"\x1dv0" in vn                       # Vietnamese line -> GS v 0 raster
     a = printer.build_receipt("Bob", "bob", "hello world", 1700000000.0)
     assert b"hello world" in a and b"\x1dv0" not in a   # ASCII stays native text
+
+
+def test_fax_rate_limit():
+    from faxxme import app as A
+    A.FAX_RATE_MAX, A.FAX_RATE_WINDOW = 3, 60
+    A._fax_hits.clear()
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    codes = [client.post("/api/fax", data={"to": "bob", "body": f"n{i}"}).status_code for i in range(5)]
+    assert codes[:3] == [200, 200, 200]        # first 3 allowed
+    assert codes[3] == 429 and codes[4] == 429  # then rate-limited
+    A.FAX_RATE_MAX = 0                           # restore (off) for any other tests
+    A._fax_hits.clear()

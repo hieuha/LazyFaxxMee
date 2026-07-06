@@ -21,6 +21,67 @@ const form = (obj) => {
   return f;
 };
 
+// ------------------------------------------------------- retro sounds ------
+// synthesized with Web Audio (no assets): dial-up handshake on send, bell on receive
+let _ac = null;
+let soundOn = localStorage.getItem("fx_sound") !== "off";
+function ac() {
+  if (!_ac) { try { _ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return null; } }
+  if (_ac.state === "suspended") _ac.resume();
+  return _ac;
+}
+function _tone(freq, start, dur, type = "sine", gain = 0.14) {
+  const ctx = ac(); if (!ctx) return;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.value = freq; o.connect(g); g.connect(ctx.destination);
+  const t = ctx.currentTime + start;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.start(t); o.stop(t + dur + 0.03);
+}
+function _noise(start, dur, gain = 0.045, freq = 1700) {
+  const ctx = ac(); if (!ctx) return;
+  const buf = ctx.createBuffer(1, Math.max(1, Math.ceil(ctx.sampleRate * dur)), ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = 0.8;
+  const g = ctx.createGain(); const t = ctx.currentTime + start;
+  g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+  src.start(t); src.stop(t + dur);
+}
+function playSend() {          // stylized dial-up modem handshake
+  if (!soundOn || !ac()) return;
+  [1209, 1336, 1477, 941, 1336].forEach((f, i) => {   // DTMF "dialing"
+    _tone(f, i * 0.11, 0.09, "square", 0.06); _tone(697, i * 0.11, 0.09, "square", 0.045);
+  });
+  _tone(420, 0.62, 0.9, "sine", 0.09);                // carrier
+  _tone(1100, 0.75, 0.8, "sine", 0.06);
+  _noise(0.95, 0.55, 0.05, 1600);                     // handshake screech
+  _tone(2250, 1.05, 0.5, "sine", 0.05);
+}
+function playReceive() {       // bright telegraph/printer bell
+  if (!soundOn || !ac()) return;
+  _tone(1568, 0, 0.14, "sine", 0.18);
+  _tone(2093, 0.05, 0.28, "sine", 0.13);
+}
+document.addEventListener("pointerdown", () => { if (soundOn) ac(); }, { once: true });  // unlock audio
+{
+  const btn = $("sound-toggle");
+  if (btn) {
+    const paint = () => { btn.textContent = soundOn ? "♪ sound: on" : "♪ sound: off"; };
+    paint();
+    btn.onclick = () => {
+      soundOn = !soundOn;
+      localStorage.setItem("fx_sound", soundOn ? "on" : "off");
+      paint();
+      if (soundOn) playReceive();
+    };
+  }
+}
+
 // ------------------------------------------------------------------ boot ---
 const BOOT = [
   "initializing faxxme terminal...",
@@ -288,6 +349,7 @@ $("fax-form").onsubmit = async (e) => {
     msg.textContent = (d.delivered ? "✓ delivered & printing on their end"
                                    : "✓ queued — prints when they come online")
                     + (d.has_image ? " · image dithered ✓" : "");
+    playSend();
     $("fax-body").value = "";
     clearAttachment();
     await refreshLogs();
@@ -467,6 +529,7 @@ const queue = [];            // faxes waiting for a printer to bind
 async function onIncomingFax(m) {
   if (seen.has(m.id)) { ackFax(m.id); return; }
   seen.add(m.id);
+  playReceive();
   queue.push(m);
   await flushQueue();
   // reflect in inbox live
