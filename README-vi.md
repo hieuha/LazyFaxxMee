@@ -1,0 +1,218 @@
+# FAXXME
+
+> 🌐 Ngôn ngữ: [English](README.md) · **Tiếng Việt**
+
+> Những bóng ma analog trên sợi dây số. Đăng ký, kết nối một chiếc máy in, rồi fax cho bạn bè.
+> Nếu máy in của họ đang online, bản fax in ra ngay lập tức; nếu không, nó xếp hàng chờ và in
+> đúng khoảnh khắc máy in trở lại. Không phải cài app nào cả — chỉ cần một trình duyệt.
+
+Một web app mang phong cách terminal / CRT / hacker. Backend viết bằng Python (FastAPI +
+WebSocket), frontend vanilla-JS. Một bản fax được in ra trên chiếc máy in nhiệt vật lý của người
+nhận qua một trong **ba đường (path)** — **trình duyệt** của họ (WebUSB), một máy in cắm thẳng
+vào **máy chủ** (local bridge — cầu nối cục bộ), hoặc một **agent chạy nền trên chiếc Raspberry
+Pi của chính họ** (node in, xác thực bằng device token).
+
+```mermaid
+flowchart LR
+    S["người gửi<br/>POST /api/fax"] --> F(["máy chủ FAXXME<br/>FastAPI"])
+    F -- "đẩy qua WebSocket" --> B["trình duyệt người nhận<br/>WebUSB → máy in"]
+    F -- "local bridge trên host" --> H["máy in trên host<br/>/dev/usb/lp0"]
+    F -- "agent trên Pi của họ · device token" --> A["máy in trên Pi node<br/>/dev/usb/lp0"]
+    F -. "offline" .-> Q[("hàng đợi SQLite")]
+    Q -. "xả hàng đợi khi kết nối lại / cắm lại nóng" .-> F
+```
+
+## Ảnh chụp màn hình
+
+| Bảng điều khiển | Tìm người nhận | Xem bản fax đã in |
+| :---: | :---: | :---: |
+| ![Bảng điều khiển FaxxMe — thanh trạng thái, soạn tin, hộp đến/hộp đi](docs/screenshots/01-console.webp) | ![Gõ để tìm operator; ai online xếp trước](docs/screenshots/02-recipient-search.webp) | ![Mỗi bản fax hiện ra như một tờ giấy in](docs/screenshots/03-receipt.webp) |
+| thanh trạng thái · soạn tin · hộp đến/đi | tìm mờ (fuzzy), ưu tiên người online | bấm vào một bản fax → tờ giấy in |
+
+## Tính năng
+
+- **Tài khoản** — đăng ký/đăng nhập, mật khẩu băm bằng pbkdf2 + cookie phiên ký bằng hmac (không phụ thuộc thư viện native nào).
+- **Soạn fax** — ô chọn người nhận có tìm kiếm, tin nhắn tối đa 200 ký tự, ảnh đính kèm tùy chọn, bộ đếm ký tự trực tiếp.
+- **Ba đường in**
+  - *WebUSB qua trình duyệt* — máy chủ dựng sẵn các byte ESC/POS, trình duyệt của người nhận chuyển tiếp nguyên vẹn tới máy in USB (tự bind lại khi cắm lại nóng, không cần bấm).
+  - *Local bridge* — một máy in cắm thẳng vào máy chủ sẽ in ngay tại phía máy chủ, không cần trình duyệt.
+  - *Node in (agent)* — một [agent](agent/README-vi.md) chạy nền trên chiếc Raspberry Pi của người nhận, xác thực bằng **device token**, in các bản fax ngay tại chỗ.
+- **Device token** — token API riêng cho mỗi tài khoản dành cho agent (lưu dạng băm sha256, chỉ hiện một lần); tạo lại (regenerate) để **thu hồi tức thì** (agent đang kết nối sẽ bị ngắt ngay).
+- **Trạng thái máy in trực tiếp** — pill PRINTER hiển thị đường in tốt nhất đang có (`ONLINE` USB trình duyệt · `NODE ✓` agent · `WIRED` cầu nối · `OFFLINE`) và cập nhật theo thời gian thực; **TEST** in một trang thử trên bất cứ đường in nào bạn đang có.
+- **Chữ Unicode** — những dòng có tiếng Việt, emoji, hay bất cứ ký tự nào bảng mã của máy in không hiển thị được sẽ tự động được dựng bằng font đóng kèm thành một raster `GS v 0` sắc nét; những dòng thuần ASCII vẫn dùng text ESC/POS gốc cho nhanh.
+- **Ảnh đính kèm** — được dither Floyd–Steinberg thành halftone 1-bit (raster `GS v 0`), kèm bản xem trước ngay ở phía client.
+- **Hàng đợi offline** — các bản fax chưa gửi được nằm chờ trong SQLite và được xả ra khi người nhận (trình duyệt/agent) kết nối lại, hoặc khi máy in trên host được cắm lại nóng (có tiến trình nền canh chừng); hộp đi của người gửi tự lật `queued → printed` ngay lập tức.
+- **Cửa sổ xem bản in** — bấm vào bất kỳ bản fax nào để thấy nó như một tờ giấy in (mép giấy rách, ảnh đã dither).
+- **Dọn dẹp** — xóa hộp đến/hộp đi (chỉ phía bạn; phía bên kia vẫn giữ bản của họ), tự giới hạn 50 bản mỗi phía, không thể tự fax cho chính mình.
+- **Kiểu cắt giấy cấu hình được** — cắt hết / đẩy tới dao cắt / cắt một phần / không cắt.
+- **`/healthz`** — endpoint kiểm tra "còn sống" cho Docker / systemd / các dịch vụ giám sát uptime.
+
+## Cơ chế hoạt động
+
+- **Hiện diện (presence) = một WebSocket đang mở.** Khi tab console đang mở là bạn *online*: các bản
+  fax được đẩy tới bạn tức thì và bạn bè thấy chấm xanh của bạn.
+- **Gửi** (`POST /api/fax`). Nếu người nhận đang online, máy chủ đẩy bản fax qua WebSocket của họ;
+  trình duyệt của họ ghi các byte ESC/POS ra máy in USB rồi báo nhận (ack). Nếu họ offline, bản fax
+  được **xếp hàng** trong SQLite.
+- **Giao khi quay lại.** Fax đang chờ được xả ra khi người nhận kết nối lại (trình duyệt **hoặc**
+  agent trên Pi), hoặc — với máy in có dây trên host — khi tiến trình nền thấy thiết bị xuất hiện
+  trở lại (kiểm tra mỗi `FAXXME_PRINTER_POLL` giây; xử lý được cả rút/cắm lại mà không cần khởi động lại).
+- **Node in = thêm một client WebSocket.** Agent xác thực bằng device token, kết nối cùng một `/ws`,
+  rồi ghi các byte ESC/POS được đẩy tới ra máy in cục bộ của nó — nên "người khác in tới tôi" hoạt
+  động mà không cần thêm chút logic nào ở máy chủ (dùng lại nguyên vẹn presence, hàng đợi, ack).
+- **Một nguồn sự thật duy nhất.** ESC/POS được dựng ở phía máy chủ (`faxxme/printer.py`); trình duyệt
+  chỉ chuyển tiếp các byte thô qua WebUSB, còn local bridge / agent ghi đúng những byte đó ra `/dev`.
+
+## Tài liệu
+
+Tài liệu chuyên sâu nằm trong [`docs/vi/`](docs/vi/):
+
+- [Cơ chế hoạt động](docs/vi/how-it-works.md) — kiến trúc, mô hình giao fax, tiến trình canh chừng, xử lý ảnh, token.
+- [Tương thích máy in](docs/vi/printers.md) — các máy in nhiệt được hỗ trợ, khổ giấy, kiểu cắt.
+- [Ghi chú theo nền tảng](docs/vi/platforms.md) — những điểm cần lưu ý của WebUSB trên Ubuntu / macOS / Windows.
+- [Node in / agent](agent/README-vi.md) — chạy FaxxMe trên chiếc Pi của bạn (device token, không cần trình duyệt).
+
+## Chạy
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# lắng nghe trên mọi interface; gán máy in có dây của host cho callsign "pi"
+FAXXME_LOCAL_USER=pi FAXXME_PRINTER_DEV=/dev/usb/lp0 ./run.sh
+# hoặc: FAXXME_LOCAL_USER=pi .venv/bin/python -m faxxme
+# -> http://<host>:8000
+```
+
+## Cấu hình
+
+Mọi cấu hình đều thông qua biến môi trường:
+
+| biến | mặc định | ý nghĩa |
+|-----|---------|---------|
+| `FAXXME_HOST` / `FAXXME_PORT` | `0.0.0.0` / `8000` | địa chỉ bind |
+| `FAXXME_LOG_LEVEL` | `info` | mức log của uvicorn |
+| `FAXXME_LOCAL_USER` | *(không đặt)* | callsign có fax được in trên máy in của CHÍNH host này (bật local bridge) |
+| `FAXXME_PRINTER_DEV` | `/dev/usb/lp0` | node thiết bị máy in cho local bridge |
+| `FAXXME_PRINTER_POLL` | `4` | số giây giữa các lần kiểm tra cắm-lại-nóng máy in |
+| `FAXXME_CUT` | `full` | cắt giấy cuối mỗi bản fax: `full` / `feed` (đẩy tới dao cắt) / `partial` / `none` |
+| `FAXXME_WIDTH` | `32` | số cột chữ (58mm ≈ 32, 80mm ≈ 48) |
+| `FAXXME_PRINT_DOTS` | `384` | bề rộng raster ảnh tính bằng dot (58mm ≈ 384, 80mm ≈ 576) |
+| `FAXXME_IMG_MAX_H` | `1200` | chiều cao ảnh in tối đa (dot) |
+| `FAXXME_MAX_UPLOAD` | `6291456` | dung lượng ảnh tải lên tối đa (byte, 6 MB) |
+| `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | giới hạn tần suất theo người gửi: tối đa N bản fax mỗi N giây (0 = tắt) |
+| `FAXXME_FONT` | Play đóng kèm (Google Fonts) | TTF dùng để dựng chữ non-ASCII (tiếng Việt, emoji…) |
+| `FAXXME_FONT_SIZE` | `26` | cỡ font khi dựng chữ Unicode |
+| `FAXXME_FONT_THRESHOLD` | `176` | ngưỡng đen/trắng khi dựng chữ (cao hơn = đậm hơn) |
+| `FAXXME_DB` / `FAXXME_SECRET` | trong repo | đường dẫn sqlite + secret của phiên |
+
+## API
+
+| method | path | mục đích |
+|--------|------|---------|
+| POST | `/api/register` · `/api/login` · `/api/logout` | xác thực (trường form) |
+| GET | `/api/me` | người dùng hiện tại + `printer_online`, `local_bridge`, `node_online`, `has_token` |
+| GET | `/api/users` | các operator khác + cờ online |
+| POST | `/api/fax` | gửi (multipart: `to`, `body`, `image` tùy chọn) |
+| GET | `/api/inbox` · `/api/outbox` | lịch sử fax (50 bản mới nhất) |
+| POST | `/api/inbox/clear` · `/api/outbox/clear` | dọn phía của bạn |
+| GET | `/api/fax/{id}/image` | ảnh PNG đã dither (chỉ người gửi/người nhận) |
+| POST | `/api/token/regenerate` | cấp một device token (chỉ hiện một lần); thu hồi + ngắt token cũ |
+| POST | `/api/test-print` | in trang thử trên node/bridge của bạn |
+| WS | `/ws` | presence + giao trực tiếp + đẩy trạng thái/node; xác thực bằng **cookie phiên** (trình duyệt) hoặc **`Authorization: Bearer <token>` + `X-Faxxme-User`** (agent) |
+| GET | `/healthz` | `{status, printer_bridge}` |
+| GET | `/` | trang console CRT đơn (SPA) |
+
+## ⚠️ WebUSB cần một secure context
+
+Trình duyệt chỉ để lộ `navigator.usb` trên **HTTPS hoặc `localhost`**, và chỉ các trình duyệt nền
+Chromium mới hỗ trợ (không có Safari/Firefox). Ngoài ra, trên **macOS/Windows** hệ điều hành chiếm
+lấy các máy in USB tuân theo chuẩn class, nên chúng sẽ không hiện trong bộ chọn WebUSB. Các lựa chọn:
+
+1. **Local bridge / node in (đơn giản nhất)** — một máy in cắm thẳng vào máy chủ, hoặc chiếc Pi của
+   chính người nhận chạy [agent](agent/README-vi.md), sẽ in ở phía máy chủ mà chẳng cần WebUSB gì cả.
+   Đó là lý do máy in trên Pi "chạy là được luôn".
+2. **Tailscale HTTPS** — chứng chỉ thật cho cả tailnet:
+   ```bash
+   sudo tailscale serve --bg http://localhost:8000   # → https://<host>.<tailnet>.ts.net
+   ```
+   (hoàn tác: `sudo tailscale serve reset`)
+3. **Cờ Chrome** để thử trong mạng LAN: `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+
+Trên **client Linux**, driver nhân `usblp` có thể đang giữ máy in: chạy `sudo modprobe -r usblp`
+trước (nhưng cách này sẽ tắt local bridge của chính host đó). Hướng dẫn đầy đủ theo từng OS:
+[docs/vi/platforms.md](docs/vi/platforms.md).
+
+## Quyền truy cập máy in (trên host)
+
+Local bridge ghi vào `/dev/usb/lp*` (thuộc `root:lp`). `deploy/install.sh` cài một udev rule
+(`/etc/udev/rules.d/99-faxxme-printer.rules`, nhóm `lp`, mode `0666`) và thêm user chạy dịch vụ vào
+nhóm `lp` để máy chủ in được mà không cần quyền root — đồng thời để thiết bị lại ghi được tự động
+sau mỗi lần cắm lại.
+
+## Chạy bằng Docker
+
+```bash
+docker compose up -d --build      # build + khởi động tại http://<host>:8000
+docker compose logs -f
+docker compose down
+```
+
+DB + secret của phiên được lưu bền trong volume `faxxme-data`. In qua trình duyệt/WebUSB chạy được
+ngay; để in trên máy in có dây của *chính host chạy container*, hãy đặt `FAXXME_LOCAL_USER` và bỏ
+comment khối `devices` + `group_add` trong `docker-compose.yml`. Hotplug USB khá phiền trong
+container — với máy in gắn thẳng vào host thì cách deploy bằng systemd sẽ mượt hơn.
+
+## Node in (agent trên Raspberry Pi)
+
+Không bind được máy in qua trình duyệt (macOS/Windows) — hay đơn giản là muốn một máy in chuyên
+dụng, luôn bật? Hãy chạy **agent** trên một Raspberry Pi có gắn máy in. Nó đăng nhập bằng callsign
+của bạn + một **device token** (trên web: `:: PRINTER NODE → GENERATE TOKEN`, tạo lại để thu hồi)
+và in mọi bản fax gửi tới bạn — không cần trình duyệt.
+
+```bash
+sudo agent/install.sh
+sudoedit agent/faxxme-agent.env    # đặt FAXXME_SERVER, callsign, token
+sudo systemctl restart faxxme-agent
+```
+
+Hướng dẫn đầy đủ: [agent/README-vi.md](agent/README-vi.md).
+
+## Chạy như một dịch vụ (systemd)
+
+```bash
+sudo deploy/install.sh          # venv + deps, udev rule máy in, unit systemd
+systemctl status faxxme
+journalctl -u faxxme -f          # xem log
+```
+
+Xem [deploy/README-vi.md](deploy/README-vi.md) để biết cách dừng/khởi động/cấu hình/gỡ cài.
+
+## Kiểm thử
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+Bao phủ `/healthz`, xác thực + kiểm tra hợp lệ, hàng đợi offline → xả qua WebSocket → ack, in ngay
+qua local bridge, **xả hàng đợi khi máy in kết nối lại**, dither ảnh + raster + kiểm soát truy cập,
+dọn theo từng phía, giới hạn 50 bản, chặn tự-fax, giới hạn độ dài tin nhắn, chặn WebSocket ẩn danh,
+**xác thực device token + thu hồi** (kể cả loại token sai), chỉ báo **node online**, định tuyến
+**test-print** tới agent, **dựng chữ Unicode thành raster**, và **giới hạn tần suất theo người gửi**.
+
+## Bố cục dự án
+
+```
+faxxme/__main__.py   `python -m faxxme` — entrypoint daemon uvicorn
+faxxme/app.py        FastAPI app: xác thực, định tuyến fax, presence, giao qua WS, canh máy in, token
+faxxme/db.py         SQLite (stdlib) — users (+ băm device-token) + faxes (+ BLOB ảnh đã dither)
+faxxme/auth.py       mật khẩu pbkdf2 + cookie phiên hmac + device token (không phụ thuộc native)
+faxxme/printer.py    bộ dựng biên nhận ESC/POS + tự cắt + local bridge in ra /dev
+faxxme/imaging.py    ảnh → raster halftone + chữ Unicode → raster sắc nét (Pillow)
+faxxme/fonts/        font Play đóng kèm (dựng tiếng Việt/emoji)
+static/              UI terminal CRT (index.html, style.css, app.js — WebUSB + WebSocket)
+agent/               agent node-in cho Raspberry Pi (faxxme_agent.py, systemd, install)
+tests/test_api.py    kiểm thử end-to-end
+deploy/              unit systemd, udev rule, env, script cài/gỡ
+Dockerfile · docker-compose.yml
+```

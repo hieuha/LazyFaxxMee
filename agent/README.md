@@ -1,5 +1,7 @@
 # FaxxMe printer agent (Raspberry Pi node)
 
+> 🌐 Language: **English** · [Tiếng Việt](README-vi.md)
+
 Turn any Raspberry Pi (or Linux box) with a thermal printer into your **printer node**:
 run this small agent and every fax sent to your callsign prints on *your* printer — you
 don't need a browser open, and it works from anywhere the Pi has internet.

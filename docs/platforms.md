@@ -1,5 +1,7 @@
 # Platform notes (Windows / Ubuntu / macOS)
 
+> 🌐 Language: **English** · [Tiếng Việt](vi/platforms.md)
+
 These notes are only about the **browser WebUSB** print path — binding a printer plugged
 into the *same computer as the browser*. If you use the **local bridge** (printer wired to the
 server host) or a **printer-node [agent](../agent/README.md)** (printer wired to your own Pi),

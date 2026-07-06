@@ -1,5 +1,7 @@
 # FaxxMe documentation
 
+> 🌐 Language: **English** · [Tiếng Việt](vi/README.md)
+
 - **[How it works](how-it-works.md)** — architecture, the delivery model, presence, the
   offline queue + hot-replug watcher, image dithering, and the receipt format.
 - **[Printer compatibility](printers.md)** — the three print paths, which thermal printers

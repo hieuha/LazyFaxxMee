@@ -1,5 +1,7 @@
 # Printer compatibility
 
+> 🌐 Language: **English** · [Tiếng Việt](vi/printers.md)
+
 FaxxMe speaks **raw ESC/POS** — the command language virtually every cheap USB/Bluetooth
 thermal receipt printer understands. There are three ways bytes reach a printer; each has
 different requirements.

@@ -1,5 +1,7 @@
 # Bundled font
 
+> 🌐 Language: **English** · [Tiếng Việt](README-vi.md)
+
 `Play-Regular.ttf` ([Google Fonts "Play"](https://fonts.google.com/specimen/Play)) — used to
 render Unicode text (Vietnamese, emoji, …) as a raster image when the thermal printer's code
 page can't represent it. Full Vietnamese coverage.

@@ -1,5 +1,7 @@
 # Deploying FaxxMe as a service
 
+> 🌐 Language: **English** · [Tiếng Việt](README-vi.md)
+
 Runs FaxxMe as a **systemd** service (`python -m faxxme` under uvicorn), sets up
 printer permissions, and streams logs to the journal.
 
@@ -59,6 +61,9 @@ sudo systemctl restart faxxme
 | `FAXXME_PRINTER_POLL` | `4` | seconds between printer hot-replug checks |
 | `FAXXME_WIDTH` / `FAXXME_PRINT_DOTS` | `32` / `384` | receipt width (58mm) |
 | `FAXXME_CUT` | `full` | end-of-fax cut: `full` / `feed` (feed-to-cutter) / `partial` / `none` |
+| `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | anti-spam: max faxes per N seconds (0 = off) |
+
+The main [README](../README.md#configuration) lists the full set (image caps, Unicode-font tuning, DB/secret paths).
 
 ## Uninstall
 

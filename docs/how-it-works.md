@@ -1,5 +1,7 @@
 # How FaxxMe works
 
+> 🌐 Language: **English** · [Tiếng Việt](vi/how-it-works.md)
+
 FaxxMe simulates the old thrill of faxing a friend: you type a message (and maybe attach
 an image), and it prints on **their** physical thermal printer — instantly if they're
 around, or the moment their printer comes back if not.

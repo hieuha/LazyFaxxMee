@@ -1,5 +1,7 @@
 # FAXXME
 
+> 🌐 Language: **English** · [Tiếng Việt](README-vi.md)
+
 > Analog ghosts on a digital wire. Register, connect a printer, and fax your friends.
 > If their printer is online it prints instantly; if not, it queues and prints the moment
 > the printer comes back. No app to install — just a browser.
@@ -194,8 +196,9 @@ See [deploy/README.md](deploy/README.md) for stop/start/config/uninstall.
 Covers `/healthz`, auth + validation, offline queue → WebSocket flush → ack, immediate
 local-bridge print, **queue flush on printer reconnect**, image dithering + raster + access
 control, per-side clear, the 50-message cap, self-fax rejection, message-length limit,
-anonymous-WebSocket rejection, **device-token auth + revocation**, the **node-online**
-indicator, and **test-print** routing to the agent.
+anonymous-WebSocket rejection, **device-token auth + revocation** (incl. bad-token reject),
+the **node-online** indicator, **test-print** routing to the agent, **Unicode-body raster
+rendering**, and the **per-sender rate limit**.
 
 ## Project layout
 
