@@ -17,8 +17,18 @@ echo "[agent] dir : $AGENT_DIR"
 echo "[agent] user: $RUN_USER"
 
 # 1) venv + websockets --------------------------------------------------------
-if [ ! -x "$VENV/bin/python" ]; then
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null; then
+    echo "[agent] installing python3-venv + python3-pip…"
+    apt-get update -qq && apt-get install -y python3-venv python3-pip
+  else
+    echo "[agent] ERROR: install your distro's python3-venv + python3-pip, then re-run." >&2
+    exit 1
+  fi
+fi
+if [ ! -x "$VENV/bin/pip" ]; then
   echo "[agent] creating virtualenv…"
+  rm -rf "$VENV"
   sudo -u "$RUN_USER" python3 -m venv "$VENV"
 fi
 sudo -u "$RUN_USER" "$VENV/bin/pip" install --quiet --upgrade pip

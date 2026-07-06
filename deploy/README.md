@@ -9,6 +9,9 @@ printer permissions, and streams logs to the journal.
 sudo deploy/install.sh
 ```
 
+Needs Python 3.10+. On Debian/Ubuntu the script auto-installs `python3-venv` + `python3-pip`
+if they're missing (via `apt`); on other distros install those yourself first.
+
 This will:
 1. Create the virtualenv (`.venv`) and install `requirements.txt`.
 2. Install a udev rule so USB thermal printers (`/dev/usb/lp*`) are writable by

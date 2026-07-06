@@ -18,8 +18,21 @@ echo "[faxxme] project : $PROJECT_DIR"
 echo "[faxxme] run user: $RUN_USER"
 
 # 1) python venv + dependencies (as the run user, not root) -------------------
-if [ ! -x "$VENV/bin/python" ]; then
+# fresh Debian/Ubuntu often lack venv/pip support -> install it
+if ! python3 -c "import ensurepip" >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null; then
+    echo "[faxxme] installing python3-venv + python3-pip…"
+    apt-get update -qq && apt-get install -y python3-venv python3-pip
+  else
+    echo "[faxxme] ERROR: python venv support is missing — install your distro's" >&2
+    echo "         python3-venv (and python3-pip), then re-run this script." >&2
+    exit 1
+  fi
+fi
+# (re)create the venv if missing or broken (no pip inside)
+if [ ! -x "$VENV/bin/pip" ]; then
   echo "[faxxme] creating virtualenv…"
+  rm -rf "$VENV"
   sudo -u "$RUN_USER" python3 -m venv "$VENV"
 fi
 echo "[faxxme] installing dependencies…"
