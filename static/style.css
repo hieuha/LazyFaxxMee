@@ -161,12 +161,17 @@ button.icon-btn.muted { color: var(--fg-dim); border-color: var(--line-soft); op
   text-shadow: var(--glow-dim);
 }
 .sb-greeting { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }  /* long name stays on its line */
-.sb-controls {
-  display: flex; align-items: center; flex-wrap: nowrap; gap: 9px;   /* all controls on one line */
-  overflow-x: auto; scrollbar-width: none;                           /* scroll the row, not the page */
+/* row 1: statuses only (YOUR PRINTER + LINK on one line) */
+.sb-status {
+  display: flex; align-items: center; flex-wrap: nowrap; gap: 16px;
+  overflow-x: auto; scrollbar-width: none;
 }
-.sb-controls::-webkit-scrollbar { display: none; }
-.sb-controls > div { flex: 0 0 auto; }
+/* row 2: action buttons */
+.sb-actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 9px;
+}
+.sb-status::-webkit-scrollbar { display: none; }
+.sb-status > div { flex: 0 0 auto; }
 .statusbar b, #who { color: var(--fg-bright); text-shadow: var(--glow-bright); }
 .sb-printer, .sb-link { display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; }
 .statusbar button { padding: 3px 9px; font-size: 11px; letter-spacing: .4px; }
