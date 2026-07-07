@@ -62,8 +62,29 @@ sudo systemctl restart faxxme
 | `FAXXME_WIDTH` / `FAXXME_PRINT_DOTS` | `32` / `384` | receipt width (58mm) |
 | `FAXXME_CUT` | `full` | end-of-fax cut: `full` / `feed` (feed-to-cutter) / `partial` / `none` |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | anti-spam: max faxes per N seconds (0 = off) |
+| `FAXXME_ADMIN_PASSWORD_HASH` | *(unset)* | sha256 of the `/admin` password; unset = admin disabled |
 
 The main [README](../README.md#configuration) lists the full set (image caps, Unicode-font tuning, DB/secret paths).
+
+### Enable the admin panel
+
+The `/admin` panel is off until you set an admin password (as its **sha256 hash** — the plaintext
+never touches the config). Generate the hash, put it in `deploy/faxxme.env`, and restart:
+
+```bash
+# 1) hash your chosen password (replace the text in b'...')
+python3 -c "import hashlib;print(hashlib.sha256(b'your-admin-password').hexdigest())"
+
+# 2) put the printed hash in deploy/faxxme.env:
+#      FAXXME_ADMIN_PASSWORD_HASH=<paste the hash>
+sudoedit deploy/faxxme.env
+
+# 3) apply
+sudo systemctl restart faxxme
+```
+
+Then open `http://<host>:8000/admin` and unlock with the password. Leave
+`FAXXME_ADMIN_PASSWORD_HASH` blank to disable the panel again.
 
 ## Uninstall
 

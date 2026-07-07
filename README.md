@@ -66,7 +66,7 @@ flowchart LR
 
 Deep-dive docs live in [`docs/`](docs/):
 
-- [How it works](docs/how-it-works.md) — architecture, delivery model, watcher, imaging, tokens.
+- [How it works](docs/how-it-works.md) — architecture, delivery model, watcher, imaging, tokens, admin.
 - [Printer compatibility](docs/printers.md) — supported thermal printers, widths, auto-cut.
 - [Platform notes](docs/platforms.md) — WebUSB gotchas on Ubuntu / macOS / Windows.
 - [Printer node / agent](agent/README.md) — run FaxxMe on your own Pi (device token, no browser).
@@ -198,12 +198,14 @@ terminal-styled control room to:
 
 - see live **stats** (operators, online now, transmissions, queued/delivered, images);
 - browse **operators** (paginated, 20/page) with sent/received counts + online/node/token status,
-  **revoke a device token**, or **delete a user** (and every fax they sent or received);
-- browse/search **all transmissions** (paginated, 20/page), view attached images, and **delete any
-  fax** (both sides).
+  **revoke a device token**, or **delete a user** (a *tombstone* — the account is anonymized and
+  can't log in, but its faxes are kept for the other party and the callsign is freed);
+- browse/search **all transmissions** (paginated, 20/page), **view** any one as a printed paper
+  slip (full text + image), and **delete any fax** (both sides).
 
-The API under `/api/admin/*` checks the admin cookie server-side (`401` without it), so the page
-itself is harmless to serve.
+Confirmations and the message viewer reuse the console's own terminal-styled modal. The API under
+`/api/admin/*` checks the admin cookie server-side (`401` without it), so the page itself is
+harmless to serve.
 
 ## Run as a service (systemd)
 

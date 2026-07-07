@@ -145,3 +145,28 @@ below the text. The same PNG is served at `GET /api/fax/{id}/image` for on-scree
 
 Click any fax in inbox/outbox to see it rendered as a **paper slip** — cream paper, torn
 zigzag edges, the exact text layout the printer produces. Handy to re-read or screenshot.
+
+## Admin panel
+
+`/admin` is an optional control room, **decoupled from user accounts**: it's unlocked by a single
+password whose sha256 hash lives in `FAXXME_ADMIN_PASSWORD_HASH` (unset ⇒ the panel is disabled).
+There is no admin user and no extra table.
+
+- **Auth.** `POST /api/admin/login` checks the password against the env hash and sets an
+  hmac-signed admin cookie (`fx_admin`) — its own session, separate from the user `fx_session`.
+  Every `/api/admin/*` route validates that cookie and returns `401` without it, so the static
+  page is safe to serve to anyone; only the data is gated. `POST /api/admin/logout` clears it.
+- **What it manages.** Live **stats**; a paginated (20/page) roster of **operators** with
+  sent/received counts and live online/node/token status — revoke a device token (kicks the agent)
+  or delete a user; and a paginated, searchable list of **all transmissions** — view one as a
+  printed slip (full text + image via `/api/admin/faxes/{id}/image`) or hard-delete it for both sides.
+- **Deleting an operator is a tombstone, not a wipe.** Rather than removing the row (which would
+  cascade-delete every fax the user was part of and strip the *other* party's copies too), the
+  account is anonymized **in place**: `db.tombstone_user` renames it to `deleted_<id>`, clears the
+  password + device token, and stamps `deleted_at`. The faxes stay valid (foreign keys intact) and
+  still render for the other party as a `deleted_<id>` account; the user drops out of the roster and
+  the recipient picker, can no longer log in, and their original callsign is freed for
+  re-registration (the `deleted_` prefix is reserved so it never collides).
+- **Shared presence.** The online / node columns read the *same* in-memory presence map the rest of
+  the app uses, so a browser tab or Pi agent connected to **this** server shows up here at once (and
+  agents pointed at a different server won't — presence is per-server, in-memory).

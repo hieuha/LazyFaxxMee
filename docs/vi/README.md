@@ -3,7 +3,7 @@
 > 🌐 Ngôn ngữ: [English](../README.md) · **Tiếng Việt**
 
 - **[Cơ chế hoạt động](how-it-works.md)** — kiến trúc, mô hình giao fax, presence, hàng đợi offline +
-  tiến trình canh chừng cắm-lại-nóng, dither ảnh, và định dạng biên nhận.
+  tiến trình canh chừng cắm-lại-nóng, dither ảnh, định dạng biên nhận, và trang quản trị.
 - **[Tương thích máy in](printers.md)** — ba đường in, những máy in nhiệt nào chạy tốt, cấu hình khổ
   giấy và tự cắt, cùng các lưu ý.
 - **[Ghi chú theo nền tảng](platforms.md)** — những điều cần để ý với WebUSB trên Ubuntu/Linux, macOS,

@@ -3,7 +3,7 @@
 > 🌐 Language: **English** · [Tiếng Việt](vi/README.md)
 
 - **[How it works](how-it-works.md)** — architecture, the delivery model, presence, the
-  offline queue + hot-replug watcher, image dithering, and the receipt format.
+  offline queue + hot-replug watcher, image dithering, the receipt format, and the admin panel.
 - **[Printer compatibility](printers.md)** — the three print paths, which thermal printers
   work well, paper-width and auto-cut config, and caveats.
 - **[Platform notes](platforms.md)** — what to watch out for with WebUSB on

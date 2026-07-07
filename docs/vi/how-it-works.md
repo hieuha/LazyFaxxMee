@@ -144,3 +144,27 @@ gửi/người nhận).
 
 Bấm vào bất kỳ bản fax nào trong hộp đến/hộp đi để thấy nó hiện ra như một **tờ giấy in** — giấy màu
 kem, mép rách zigzag, đúng bố cục chữ mà máy in tạo ra. Tiện để đọc lại hoặc chụp màn hình.
+
+## Trang quản trị (admin)
+
+`/admin` là một "phòng điều khiển" tùy chọn, **tách rời khỏi tài khoản người dùng**: nó được mở khóa
+bằng một mật khẩu duy nhất mà hash sha256 của nó nằm trong `FAXXME_ADMIN_PASSWORD_HASH` (không đặt ⇒
+tắt hẳn trang). Không có tài khoản admin, không thêm bảng nào.
+
+- **Xác thực.** `POST /api/admin/login` so mật khẩu với hash trong env rồi đặt một cookie admin ký
+  bằng hmac (`fx_admin`) — phiên riêng, tách khỏi `fx_session` của người dùng. Mọi route
+  `/api/admin/*` đều kiểm cookie này và trả `401` nếu thiếu, nên trang tĩnh phục vụ cho ai cũng vô
+  hại; chỉ dữ liệu mới bị chặn. `POST /api/admin/logout` xóa cookie.
+- **Quản lý gì.** **Thống kê** trực tiếp; danh sách **operator** phân trang (20/trang) kèm số fax
+  gửi/nhận và trạng thái online/node/token — thu hồi device token (ngắt agent) hoặc xóa người dùng;
+  và danh sách **toàn bộ tin nhắn** phân trang, tìm kiếm được — xem một bản dưới dạng tờ giấy in
+  (đầy đủ nội dung + ảnh qua `/api/admin/faxes/{id}/image`) hoặc xóa hẳn cả hai phía.
+- **Xóa operator là "tombstone", không phải xóa sạch.** Thay vì xóa dòng user (sẽ kéo theo xóa mọi
+  fax user đó dính tới và cuốn luôn bản sao của *đối phương*), tài khoản được **ẩn danh tại chỗ**:
+  `db.tombstone_user` đổi tên thành `deleted_<id>`, xóa mật khẩu + device token, và ghi `deleted_at`.
+  Fax vẫn hợp lệ (khóa ngoại còn nguyên) và vẫn hiển thị cho đối phương dưới dạng tài khoản
+  `deleted_<id>`; user biến khỏi roster và ô chọn người nhận, không đăng nhập được nữa, còn callsign
+  gốc thì được giải phóng để đăng ký lại (tiền tố `deleted_` được giữ chỗ nên không bao giờ trùng).
+- **Dùng chung presence.** Cột online / node đọc *đúng* map presence trong RAM mà phần còn lại của
+  app dùng, nên một tab trình duyệt hoặc agent Pi kết nối tới **server này** sẽ hiện ngay ở đây (còn
+  agent trỏ tới server khác thì không — presence là theo từng server, lưu trong RAM).

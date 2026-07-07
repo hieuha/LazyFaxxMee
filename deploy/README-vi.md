@@ -63,9 +63,30 @@ sudo systemctl restart faxxme
 | `FAXXME_WIDTH` / `FAXXME_PRINT_DOTS` | `32` / `384` | bề rộng biên nhận (58mm) |
 | `FAXXME_CUT` | `full` | cắt giấy cuối mỗi bản fax: `full` / `feed` (đẩy tới dao cắt) / `partial` / `none` |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | chống spam: tối đa N bản fax mỗi N giây (0 = tắt) |
+| `FAXXME_ADMIN_PASSWORD_HASH` | *(không đặt)* | hash sha256 của mật khẩu `/admin`; không đặt = tắt admin |
 
 [README](../README-vi.md#cấu-hình) chính liệt kê đầy đủ (giới hạn ảnh, tinh chỉnh font Unicode, đường
 dẫn DB/secret).
+
+### Bật trang quản trị (admin)
+
+Trang `/admin` tắt cho tới khi bạn đặt mật khẩu admin (dưới dạng **hash sha256** — mật khẩu gốc
+không bao giờ nằm trong file config). Tạo hash, đặt vào `deploy/faxxme.env`, rồi khởi động lại:
+
+```bash
+# 1) hash mật khẩu bạn chọn (thay chữ trong b'...')
+python3 -c "import hashlib;print(hashlib.sha256(b'mat-khau-admin-cua-ban').hexdigest())"
+
+# 2) đặt hash vừa in vào deploy/faxxme.env:
+#      FAXXME_ADMIN_PASSWORD_HASH=<dán hash vào đây>
+sudoedit deploy/faxxme.env
+
+# 3) áp dụng
+sudo systemctl restart faxxme
+```
+
+Rồi mở `http://<host>:8000/admin` và mở khóa bằng mật khẩu. Để trống
+`FAXXME_ADMIN_PASSWORD_HASH` là tắt trang này trở lại.
 
 ## Gỡ cài
 

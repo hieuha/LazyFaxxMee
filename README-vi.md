@@ -67,7 +67,7 @@ flowchart LR
 
 Tài liệu chuyên sâu nằm trong [`docs/vi/`](docs/vi/):
 
-- [Cơ chế hoạt động](docs/vi/how-it-works.md) — kiến trúc, mô hình giao fax, tiến trình canh chừng, xử lý ảnh, token.
+- [Cơ chế hoạt động](docs/vi/how-it-works.md) — kiến trúc, mô hình giao fax, tiến trình canh chừng, xử lý ảnh, token, admin.
 - [Tương thích máy in](docs/vi/printers.md) — các máy in nhiệt được hỗ trợ, khổ giấy, kiểu cắt.
 - [Ghi chú theo nền tảng](docs/vi/platforms.md) — những điểm cần lưu ý của WebUSB trên Ubuntu / macOS / Windows.
 - [Node in / agent](agent/README-vi.md) — chạy FaxxMe trên chiếc Pi của bạn (device token, không cần trình duyệt).
@@ -199,11 +199,13 @@ khiển" phong cách terminal để:
 
 - xem **thống kê** trực tiếp (số operator, đang online, số fax, đang chờ/đã giao, số ảnh);
 - duyệt **operator** (phân trang, 20/trang) kèm số fax gửi/nhận + trạng thái online/node/token,
-  **thu hồi device token**, hoặc **xóa một người dùng** (và mọi bản fax họ gửi hoặc nhận);
-- duyệt/tìm **toàn bộ tin nhắn (fax)** (phân trang, 20/trang), xem ảnh đính kèm, và **xóa bất kỳ
-  bản fax nào** (cả hai phía).
+  **thu hồi device token**, hoặc **xóa một người dùng** (*tombstone* — tài khoản bị ẩn danh, không
+  đăng nhập được nữa, nhưng fax vẫn được giữ cho đối phương và callsign được giải phóng);
+- duyệt/tìm **toàn bộ tin nhắn (fax)** (phân trang, 20/trang), **xem** từng bản dưới dạng tờ giấy
+  in (đầy đủ nội dung + ảnh), và **xóa bất kỳ bản fax nào** (cả hai phía).
 
-API dưới `/api/admin/*` kiểm tra cookie admin ở phía máy chủ (không có cookie → `401`), nên bản thân
+Hộp xác nhận và cửa sổ xem tin nhắn đều dùng lại modal phong cách terminal của chính console. API
+dưới `/api/admin/*` kiểm tra cookie admin ở phía máy chủ (không có cookie → `401`), nên bản thân
 trang đó phục vụ ra ngoài là vô hại.
 
 ## Chạy như một dịch vụ (systemd)
