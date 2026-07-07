@@ -544,8 +544,14 @@ function setLink(up) {
 function connectWS() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => setLink(true);
-  ws.onclose = () => { setLink(false); setTimeout(() => { if (ME) connectWS(); }, 2500); };
+  let hb = null;   // heartbeat so the server can keep our last_seen fresh while we're online
+  ws.onopen = () => {
+    setLink(true);
+    hb = setInterval(() => {
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "ping" }));
+    }, 30000);
+  };
+  ws.onclose = () => { clearInterval(hb); setLink(false); setTimeout(() => { if (ME) connectWS(); }, 2500); };
   ws.onmessage = async (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === "fax") await onIncomingFax(m);

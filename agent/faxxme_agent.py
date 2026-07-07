@@ -100,7 +100,16 @@ async def run_once():
                 elif t == "hello":
                     log("authenticated as", m.get("user", {}).get("username", USER))
 
-        await asyncio.gather(receive_loop(), retry_loop())
+        async def heartbeat_loop():
+            # app-level ping so the server keeps this node's "last seen" fresh
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    await ws.send(json.dumps({"type": "ping"}))
+                except Exception:
+                    return
+
+        await asyncio.gather(receive_loop(), retry_loop(), heartbeat_loop())
 
 
 async def main():

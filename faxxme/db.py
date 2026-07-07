@@ -31,7 +31,10 @@ def init() -> None:
                 salt         TEXT NOT NULL,
                 created_at   REAL NOT NULL,
                 token_hash   TEXT,             -- sha256 of the device/API token, or NULL
-                deleted_at   REAL              -- tombstone timestamp (anonymized), or NULL if active
+                deleted_at   REAL,             -- tombstone timestamp (anonymized), or NULL if active
+                last_ip      TEXT,             -- client IP at last login / WS connect
+                last_ua      TEXT,             -- client User-Agent at that time
+                last_seen    REAL              -- timestamp of latest activity (login / connect / heartbeat)
             );
             CREATE TABLE IF NOT EXISTS faxes (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,6 +65,12 @@ def init() -> None:
             _conn.execute("ALTER TABLE users ADD COLUMN token_hash TEXT")
         if "deleted_at" not in have_u:
             _conn.execute("ALTER TABLE users ADD COLUMN deleted_at REAL")
+        if "last_ip" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN last_ip TEXT")
+        if "last_ua" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN last_ua TEXT")
+        if "last_seen" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN last_seen REAL")
         # normalize any legacy non-lowercase usernames (idempotent; skip if it would collide)
         for uid, uname in _conn.execute(
                 "SELECT id, username FROM users WHERE username <> lower(username)").fetchall():
@@ -110,6 +119,21 @@ def get_user_by_name(username: str) -> dict | None:
 def set_user_token(user_id: int, token_hash: str) -> None:
     with _lock:
         _c().execute("UPDATE users SET token_hash=? WHERE id=?", (token_hash, user_id))
+        _c().commit()
+
+
+def touch_user(user_id: int, ip: str | None, ua: str | None = None) -> None:
+    """Record client IP + User-Agent + timestamp of a user's latest login / socket connect."""
+    with _lock:
+        _c().execute("UPDATE users SET last_ip=?, last_ua=?, last_seen=? WHERE id=?",
+                     (ip, ua, time.time(), user_id))
+        _c().commit()
+
+
+def touch_seen(user_id: int) -> None:
+    """Bump only last_seen (heartbeat / disconnect) without disturbing IP/UA."""
+    with _lock:
+        _c().execute("UPDATE users SET last_seen=? WHERE id=?", (time.time(), user_id))
         _c().commit()
 
 
@@ -278,7 +302,7 @@ def admin_list_users(limit: int = 20, offset: int = 0) -> list[dict]:
     with _lock:
         rows = _c().execute(
             """SELECT u.id, u.username, u.display_name, u.created_at,
-                      (u.token_hash IS NOT NULL) AS has_token,
+                      (u.token_hash IS NOT NULL) AS has_token, u.last_ip, u.last_ua, u.last_seen,
                       (SELECT COUNT(*) FROM faxes f WHERE f.sender_id=u.id)    AS sent,
                       (SELECT COUNT(*) FROM faxes f WHERE f.recipient_id=u.id) AS received
                FROM users u WHERE u.deleted_at IS NULL ORDER BY u.created_at LIMIT ? OFFSET ?""",

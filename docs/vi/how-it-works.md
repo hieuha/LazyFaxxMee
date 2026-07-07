@@ -156,7 +156,11 @@ tắt hẳn trang). Không có tài khoản admin, không thêm bảng nào.
   `/api/admin/*` đều kiểm cookie này và trả `401` nếu thiếu, nên trang tĩnh phục vụ cho ai cũng vô
   hại; chỉ dữ liệu mới bị chặn. `POST /api/admin/logout` xóa cookie.
 - **Quản lý gì.** **Thống kê** trực tiếp; danh sách **operator** phân trang (20/trang) kèm số fax
-  gửi/nhận và trạng thái online/node/token — thu hồi device token (ngắt agent) hoặc xóa người dùng;
+  gửi/nhận, **phiên gần nhất** — IP + User-Agent lấy lúc login/WS connect (IP/UA ưu tiên header
+  `CF-Connecting-IP` / `X-Forwarded-For` để lấy đúng client thật sau Cloudflare, không phải proxy)
+  cùng mốc **last-seen** được giữ tươi bằng heartbeat 30s (cả tab trình duyệt lẫn agent Pi đều gửi
+  `ping` ở tầng ứng dụng; cũng ghi lại lúc ngắt kết nối) — và trạng thái online/node/token — thu
+  hồi device token (ngắt agent) hoặc xóa người dùng;
   và danh sách **toàn bộ tin nhắn** phân trang, tìm kiếm được — xem một bản dưới dạng tờ giấy in
   (đầy đủ nội dung + ảnh qua `/api/admin/faxes/{id}/image`) hoặc xóa hẳn cả hai phía.
 - **Xóa operator là "tombstone", không phải xóa sạch.** Thay vì xóa dòng user (sẽ kéo theo xóa mọi

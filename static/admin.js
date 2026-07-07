@@ -25,6 +25,19 @@ const fmtTime = (t) => {                    // compact, fixed-width: 2026-07-06 
   return `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())} ${_pad(d.getHours())}:${_pad(d.getMinutes())}`;
 };
 
+// Condense a raw User-Agent to "Browser · OS" (full string stays in the title tooltip).
+function shortUA(ua) {
+  const s = ua || "";
+  if (/FaxxMe-Agent/i.test(s)) return "FaxxMe agent (Pi)";
+  const br = /Edg\//.test(s) ? "Edge" : /OPR\//.test(s) ? "Opera" : /Chrome\//.test(s) ? "Chrome"
+    : /Firefox\//.test(s) ? "Firefox" : (/Safari\//.test(s) && !/Chrome/.test(s)) ? "Safari" : "";
+  const os = /Android/.test(s) ? "Android" : /(iPhone|iPad|iOS)/.test(s) ? "iOS"
+    : /(Macintosh|Mac OS X)/.test(s) ? "macOS" : /Windows/.test(s) ? "Windows"
+    : /Linux/.test(s) ? "Linux" : "";
+  const label = [br, os].filter(Boolean).join(" · ");
+  return label || (s.length > 30 ? s.slice(0, 30) + "…" : s);
+}
+
 const PER_PAGE = 20;                 // default page size for both tables
 let usersPage = 0;
 let faxPage = 0;
@@ -190,7 +203,7 @@ async function loadUsers() {
   if (usersPage > last) { usersPage = last; return loadUsers(); }   // page emptied out -> step back
   $("users-count").textContent = `(${total})`;
   $("users-body").innerHTML = users.map(userRow).join("") ||
-    `<tr><td colspan="7" class="empty">no operators on this page</td></tr>`;
+    `<tr><td colspan="8" class="empty">no operators on this page</td></tr>`;
   renderPager($("users-pager"), usersPage, total, (p) => { usersPage = p; loadUsers().catch(onErr); });
 }
 
@@ -202,11 +215,15 @@ function userRow(u) {
   const actions = [];
   if (u.has_token) actions.push(`<button class="ghost tiny" data-act="revoke" data-id="${u.id}" data-name="${esc(u.username)}">revoke</button>`);
   actions.push(`<button class="danger tiny" data-act="deluser" data-id="${u.id}" data-name="${esc(u.username)}">delete</button>`);
+  const ipLine = u.last_ip ? `<span class="mono">${esc(u.last_ip)}</span>` : `<span class="small">—</span>`;
+  const seenLine = u.last_seen ? `<div class="small">${fmtTime(u.last_seen)}</div>` : "";
+  const uaLine = u.last_ua ? `<div class="small ua" title="${esc(u.last_ua)}">${esc(shortUA(u.last_ua))}</div>` : "";
   return `<tr>
     <td class="mono nowrap">@${esc(u.username)}</td>
     <td>${esc(u.display_name)}</td>
     <td class="nowrap small">${fmtTime(u.created_at)}</td>
     <td class="statuscell">${tags.join(" ")}</td>
+    <td class="sesscell">${ipLine}${seenLine}${uaLine}</td>
     <td class="num">${u.sent}</td>
     <td class="num">${u.received}</td>
     <td class="actions"><div class="actbtns">${actions.join("")}</div></td>

@@ -157,8 +157,12 @@ There is no admin user and no extra table.
   Every `/api/admin/*` route validates that cookie and returns `401` without it, so the static
   page is safe to serve to anyone; only the data is gated. `POST /api/admin/logout` clears it.
 - **What it manages.** Live **stats**; a paginated (20/page) roster of **operators** with
-  sent/received counts and live online/node/token status — revoke a device token (kicks the agent)
-  or delete a user; and a paginated, searchable list of **all transmissions** — view one as a
+  sent/received counts, the **last session** — IP + User-Agent captured at login/WS connect
+  (the IP/UA prefer the `CF-Connecting-IP` / `X-Forwarded-For` header so it's the real client
+  behind Cloudflare, not the proxy) plus a **last-seen** timestamp kept fresh by a 30s heartbeat
+  (browser tabs and Pi agents both send an app-level `ping`; it's also stamped on disconnect) —
+  and live online/node/token status — revoke a device token (kicks the agent) or delete a
+  user; and a paginated, searchable list of **all transmissions** — view one as a
   printed slip (full text + image via `/api/admin/faxes/{id}/image`) or hard-delete it for both sides.
 - **Deleting an operator is a tombstone, not a wipe.** Rather than removing the row (which would
   cascade-delete every fax the user was part of and strip the *other* party's copies too), the

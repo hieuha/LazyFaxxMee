@@ -198,7 +198,9 @@ Rồi mở **`/admin`**, mở khóa bằng mật khẩu (có cookie phiên ký r
 khiển" phong cách terminal để:
 
 - xem **thống kê** trực tiếp (số operator, đang online, số fax, đang chờ/đã giao, số ảnh);
-- duyệt **operator** (phân trang, 20/trang) kèm số fax gửi/nhận + trạng thái online/node/token,
+- duyệt **operator** (phân trang, 20/trang) kèm số fax gửi/nhận, **phiên gần nhất**
+  (IP + User-Agent, nhận biết Cloudflare/proxy, kèm last-seen được giữ "sống" bằng heartbeat) +
+  trạng thái online/node/token,
   **thu hồi device token**, hoặc **xóa một người dùng** (*tombstone* — tài khoản bị ẩn danh, không
   đăng nhập được nữa, nhưng fax vẫn được giữ cho đối phương và callsign được giải phóng);
 - duyệt/tìm **toàn bộ tin nhắn (fax)** (phân trang, 20/trang), **xem** từng bản dưới dạng tờ giấy

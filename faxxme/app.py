@@ -131,6 +131,20 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=401, detail="admin authentication required")
 
 
+def _client_ip(conn) -> str | None:
+    """Best-effort client IP for a Request or WebSocket: honor Cloudflare / reverse-proxy
+    headers (the real peer is hidden behind them), else fall back to the socket address."""
+    h = conn.headers
+    ip = h.get("cf-connecting-ip") or (h.get("x-forwarded-for") or "").split(",")[0]
+    ip = ip.strip() or (conn.client.host if conn.client else "")
+    return ip[:64] or None
+
+
+def _client_ua(conn) -> str | None:
+    ua = (conn.headers.get("user-agent") or "").strip()
+    return ua[:200] or None
+
+
 def render_escpos(fax: dict) -> bytes:
     """Full ESC/POS for a fax: text header + body + optional dithered image raster."""
     sender = db.get_user(fax["sender_id"])
@@ -250,6 +264,7 @@ async def register(request: Request, username: str = Form(...), password: str = 
         raise HTTPException(409, "callsign already taken")
     ph, salt = auth.hash_password(password)
     user = db.create_user(username, (display_name.strip() or username)[:32], ph, salt)
+    db.touch_user(user["id"], _client_ip(request), _client_ua(request))
     resp = JSONResponse({"ok": True, "user": _public(user)})
     _set_session(resp, user["id"], secure=request.url.scheme == "https")
     return resp
@@ -260,6 +275,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
     user = db.get_user_by_name(username.strip().lower())
     if not user or not auth.verify_password(password, user["pass_hash"], user["salt"]):
         raise HTTPException(401, "bad callsign or password")
+    db.touch_user(user["id"], _client_ip(request), _client_ua(request))
     resp = JSONResponse({"ok": True, "user": _public(user)})
     _set_session(resp, user["id"], secure=request.url.scheme == "https")
     return resp
@@ -564,6 +580,7 @@ async def ws_endpoint(ws: WebSocket):
     if not user:
         await ws.close(code=4401)
         return
+    db.touch_user(user["id"], _client_ip(ws), _client_ua(ws))   # IP + UA for browser tabs and Pi agents
     is_agent = ws.headers.get("authorization", "").lower().startswith("bearer ")
     await ws.accept()
     await presence.add(user["id"], ws, is_agent=is_agent)
@@ -582,12 +599,14 @@ async def ws_endpoint(ws: WebSocket):
                 if fax and fax["recipient_id"] == user["id"] and fax["status"] != "delivered":
                     db.mark_delivered(fid)
             elif msg.get("type") == "ping":
+                db.touch_seen(user["id"])           # heartbeat -> keep last_seen fresh while online
                 await ws.send_json({"type": "pong"})
     except WebSocketDisconnect:
         pass
     except Exception:
         pass
     finally:
+        db.touch_seen(user["id"])                   # record when they dropped off
         await presence.remove(user["id"], ws)
         if is_agent and not presence.node_online(user["id"]):
             await _broadcast_node(user["id"], False)

@@ -575,3 +575,43 @@ def test_register_reserved_prefix_variants():
     assert client.post("/api/register", data={"username": "deleted_1", "password": "pw123456"}).status_code == 400
     assert client.post("/api/register", data={"username": "deleted_abc", "password": "pw123456"}).status_code == 400
     assert client.post("/api/register", data={"username": "notdeleted", "password": "pw123456"}).status_code == 200
+
+
+def test_admin_records_client_ip_and_ua():
+    # login behind Cloudflare -> the real client IP (CF header) + User-Agent are recorded
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"},
+                headers={"CF-Connecting-IP": "203.0.113.7", "User-Agent": "TestBrowser/9"})
+    _admin_login()
+    alice = next(u for u in _admin_users() if u["username"] == "alice")
+    assert alice["last_ip"] == "203.0.113.7" and alice["last_seen"] and alice["last_ua"] == "TestBrowser/9"
+    # X-Forwarded-For (first hop) is used when there's no CF header
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"},
+                headers={"X-Forwarded-For": "198.51.100.9, 10.0.0.1"})
+    _admin_login()
+    alice = next(u for u in _admin_users() if u["username"] == "alice")
+    assert alice["last_ip"] == "198.51.100.9"
+
+
+def test_ws_connect_records_ip_and_ua():
+    _reg("ipagent")
+    client.post("/api/login", data={"username": "ipagent", "password": "pw123456"})
+    tok = client.post("/api/token/regenerate").json()["token"]
+    client.post("/api/logout")
+    hdrs = {"Authorization": f"Bearer {tok}", "X-Faxxme-User": "ipagent",
+            "CF-Connecting-IP": "192.0.2.55", "User-Agent": "FaxxMe-Agent/0.1"}
+    with client.websocket_connect("/ws", headers=hdrs) as ws:
+        assert ws.receive_json()["type"] == "hello"
+    _admin_login()
+    u = next(x for x in _admin_users() if x["username"] == "ipagent")
+    assert u["last_ip"] == "192.0.2.55" and u["last_ua"] == "FaxxMe-Agent/0.1"
+
+
+def test_ws_ping_pong_updates_last_seen():
+    _reg("hbusr")
+    client.post("/api/login", data={"username": "hbusr", "password": "pw123456"})
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ws.send_json({"type": "ping"})
+        assert ws.receive_json()["type"] == "pong"     # heartbeat answered, last_seen bumped
+    _admin_login()
+    assert next(x for x in _admin_users() if x["username"] == "hbusr")["last_seen"]

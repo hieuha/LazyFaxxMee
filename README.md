@@ -197,7 +197,9 @@ Then open **`/admin`**, unlock with the password (its own signed session cookie)
 terminal-styled control room to:
 
 - see live **stats** (operators, online now, transmissions, queued/delivered, images);
-- browse **operators** (paginated, 20/page) with sent/received counts + online/node/token status,
+- browse **operators** (paginated, 20/page) with sent/received counts, the **last session**
+  (IP + User-Agent, Cloudflare/proxy-aware, with a last-seen kept live by a heartbeat) +
+  online/node/token status,
   **revoke a device token**, or **delete a user** (a *tombstone* — the account is anonymized and
   can't log in, but its faxes are kept for the other party and the callsign is freed);
 - browse/search **all transmissions** (paginated, 20/page), **view** any one as a printed paper
