@@ -19,7 +19,11 @@ const api = async (path, opts = {}) => {
 };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const fmtTime = (t) => new Date(t * 1000).toLocaleString();
+const _pad = (n) => String(n).padStart(2, "0");
+const fmtTime = (t) => {                    // compact, fixed-width: 2026-07-06 19:02
+  const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())} ${_pad(d.getHours())}:${_pad(d.getMinutes())}`;
+};
 
 const PER_PAGE = 20;                 // default page size for both tables
 let usersPage = 0;
@@ -51,6 +55,81 @@ function flash(text, cls = "info") {
 function flashLogin(text, cls = "err") {
   const el = $("admin-login-msg");
   el.textContent = text; el.className = "msg " + cls;
+}
+
+// -------------------------------------------- shared modals (match console) ---
+// Terminal-styled confirm, same look as the main console's confirmBox.
+function confirmBox(message, { title = "confirm", ok = "CONFIRM", cancel = "CANCEL" } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML =
+      `<div class="modal" role="dialog" aria-modal="true">
+         <div class="modal-title">:: ${title}</div>
+         <div class="modal-body"></div>
+         <div class="modal-actions">
+           <button class="ghost" data-act="cancel">${cancel}</button>
+           <button data-act="ok">${ok}</button>
+         </div>
+       </div>`;
+    overlay.querySelector(".modal-body").textContent = message;
+    document.body.appendChild(overlay);
+    const done = (v) => { document.removeEventListener("keydown", onKey); overlay.remove(); resolve(v); };
+    const onKey = (e) => { if (e.key === "Escape") done(false); else if (e.key === "Enter") done(true); };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) return done(false);
+      const a = e.target.getAttribute("data-act");
+      if (a) done(a === "ok");
+    });
+    document.addEventListener("keydown", onKey);
+    requestAnimationFrame(() => overlay.querySelector('[data-act="ok"]').focus());
+  });
+}
+
+const _stamp = (t) => {
+  const d = new Date(t * 1000);
+  return `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())} ` +
+         `${_pad(d.getHours())}:${_pad(d.getMinutes())}:${_pad(d.getSeconds())}`;
+};
+
+// View one transmission as the printed paper slip (same receipt style as the console).
+function openFaxModal(f) {
+  const rule = "-".repeat(32);
+  const imgTag = f.has_image ? `<img class="r-img" src="/api/admin/faxes/${f.id}/image" alt="fax image">` : "";
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay receipt-overlay";
+  overlay.innerHTML =
+    `<div class="receipt-wrap">
+       <div class="receipt">
+         <div class="r-head">FAXXME</div>
+         <div class="r-rule">${rule}</div>
+         <div class="r-meta r-from"></div>
+         <div class="r-meta r-to"></div>
+         <div class="r-meta r-time"></div>
+         <div class="r-meta r-status"></div>
+         <div class="r-rule">${rule}</div>
+         <div class="r-body"></div>
+         ${imgTag}
+         <div class="r-rule">${rule}</div>
+         <div class="r-end">.: end of message :.</div>
+       </div>
+       <button type="button" class="ghost r-close">✕ close</button>
+     </div>`;
+  overlay.querySelector(".r-from").textContent = `FROM: ${f.sender_display} @${f.sender_name}`;
+  overlay.querySelector(".r-to").textContent = `TO:   ${f.recipient_display} @${f.recipient_name}`;
+  overlay.querySelector(".r-time").textContent = `TIME: ${_stamp(f.created_at)}`;
+  const cleared = [f.sender_deleted && "S", f.recipient_deleted && "R"].filter(Boolean).join("/");
+  overlay.querySelector(".r-status").textContent =
+    `STATUS: #${f.id} ${f.status}${cleared ? `  (cleared ${cleared})` : ""}`;
+  const body = overlay.querySelector(".r-body");
+  if (f.body) body.textContent = f.body; else body.classList.add("hidden");
+  document.body.appendChild(overlay);
+  const done = () => { document.removeEventListener("keydown", onKey); overlay.remove(); };
+  const onKey = (e) => { if (e.key === "Escape") done(); };
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || e.target.classList.contains("r-close")) done();
+  });
+  document.addEventListener("keydown", onKey);
 }
 
 // ----------------------------------------------------------------- login ---
@@ -107,6 +186,8 @@ function renderPager(el, page, total, go) {
 // ----------------------------------------------------------------- users ---
 async function loadUsers() {
   const { users, total } = await api(`/api/admin/users?limit=${PER_PAGE}&offset=${usersPage * PER_PAGE}`);
+  const last = Math.max(0, Math.ceil(total / PER_PAGE) - 1);
+  if (usersPage > last) { usersPage = last; return loadUsers(); }   // page emptied out -> step back
   $("users-count").textContent = `(${total})`;
   $("users-body").innerHTML = users.map(userRow).join("") ||
     `<tr><td colspan="7" class="empty">no operators on this page</td></tr>`;
@@ -119,23 +200,29 @@ function userRow(u) {
   if (u.node_online) tags.push(`<span class="tag-node">NODE</span>`);
   if (u.has_token) tags.push(`<span class="tag-tok">TOKEN</span>`);
   const actions = [];
-  if (u.has_token) actions.push(`<button class="ghost tiny" data-act="revoke" data-id="${u.id}" data-name="${esc(u.username)}">revoke token</button>`);
+  if (u.has_token) actions.push(`<button class="ghost tiny" data-act="revoke" data-id="${u.id}" data-name="${esc(u.username)}">revoke</button>`);
   actions.push(`<button class="danger tiny" data-act="deluser" data-id="${u.id}" data-name="${esc(u.username)}">delete</button>`);
   return `<tr>
-    <td class="mono">@${esc(u.username)}</td>
+    <td class="mono nowrap">@${esc(u.username)}</td>
     <td>${esc(u.display_name)}</td>
     <td class="nowrap small">${fmtTime(u.created_at)}</td>
     <td class="statuscell">${tags.join(" ")}</td>
     <td class="num">${u.sent}</td>
     <td class="num">${u.received}</td>
-    <td class="actions">${actions.join(" ")}</td>
+    <td class="actions"><div class="actbtns">${actions.join("")}</div></td>
   </tr>`;
 }
 
 // ----------------------------------------------------------------- faxes ---
+let faxMap = {};                     // id -> fax, so "view" can open the full slip
+
 async function loadFaxes() {
   const { faxes, total } = await api(`/api/admin/faxes?limit=${PER_PAGE}&offset=${faxPage * PER_PAGE}` +
     (faxQuery ? `&q=${encodeURIComponent(faxQuery)}` : ""));
+  const last = Math.max(0, Math.ceil(total / PER_PAGE) - 1);
+  if (faxPage > last) { faxPage = last; return loadFaxes(); }       // page emptied out -> step back
+  faxMap = {};
+  faxes.forEach((f) => { faxMap[f.id] = f; });
   $("faxes-count").textContent = `(${total})`;
   $("faxes-body").innerHTML = faxes.map(faxRow).join("") ||
     `<tr><td colspan="6" class="empty">no transmissions${faxQuery ? " match that filter" : ""}</td></tr>`;
@@ -145,39 +232,55 @@ async function loadFaxes() {
 function faxRow(f) {
   const st = f.status === "delivered" ? "on" : "warn";
   const cleared = [f.sender_deleted && "S", f.recipient_deleted && "R"].filter(Boolean).join("/");
-  const img = f.has_image
-    ? ` <a class="imglink" href="/api/admin/faxes/${f.id}/image" target="_blank" rel="noopener">[img]</a>` : "";
-  const preview = f.body ? esc(f.body).slice(0, 140) : `<span class="small">(image only)</span>`;
+  const parts = [];
+  if (f.body) parts.push(esc(f.body).slice(0, 120));
+  if (f.has_image) parts.push(`<span class="tag-img">IMG</span>`);
   return `<tr>
     <td class="num small">${f.id}</td>
     <td class="nowrap"><span class="mono">@${esc(f.sender_name)}</span> → <span class="mono">@${esc(f.recipient_name)}</span></td>
     <td class="nowrap small">${fmtTime(f.created_at)}</td>
     <td><span class="pill ${st}">${f.status}</span>${cleared ? `<span class="small"> cleared:${cleared}</span>` : ""}</td>
-    <td class="msgcell">${preview}${img}</td>
-    <td class="actions"><button class="danger tiny" data-act="delfax" data-id="${f.id}">delete</button></td>
+    <td class="msgcell">${parts.join(" ")}</td>
+    <td class="actions"><div class="actbtns">
+      <button class="ghost tiny" data-act="viewfax" data-id="${f.id}">view</button>
+      <button class="danger tiny" data-act="delfax" data-id="${f.id}">delete</button>
+    </div></td>
   </tr>`;
 }
 
 // --------------------------------------------------------------- actions ---
-const onErr = (err) => flash("✗ " + err.message, "err");
+const onErr = (err) => {
+  if (err && err.status === 401) {            // admin session expired mid-use -> back to the gate
+    show("login");
+    flashLogin("session expired — enter the admin password.", "info");
+    return;
+  }
+  flash("✗ " + (err && err.message || "request failed"), "err");
+};
 
 document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("button[data-act]");
+  const btn = e.target.closest("table.admin button[data-act]");   // row actions only, not modal buttons
   if (!btn) return;
   const { act, id, name } = btn.dataset;
+  if (act === "viewfax") { if (faxMap[id]) openFaxModal(faxMap[id]); return; }
   try {
     if (act === "revoke") {
-      if (!confirm(`Revoke @${name}'s device token? Their Pi agent is disconnected immediately.`)) return;
+      if (!(await confirmBox(`Revoke @${name}'s device token? Their Pi agent is disconnected immediately.`,
+        { title: "revoke token", ok: "REVOKE" }))) return;
       await api(`/api/admin/users/${id}/revoke-token`, { method: "POST" });
       flash(`✓ token revoked for @${name}`, "ok");
       await loadUsers();
     } else if (act === "deluser") {
-      if (!confirm(`Delete @${name} and ALL faxes they sent or received? This cannot be undone.`)) return;
+      if (!(await confirmBox(
+        `Delete @${name}? The account is anonymized and can no longer log in, but existing faxes ` +
+        `are kept for the other party (shown as a deleted account). This cannot be undone.`,
+        { title: "delete operator", ok: "DELETE" }))) return;
       await api(`/api/admin/users/${id}/delete`, { method: "POST" });
-      flash(`✓ deleted @${name}`, "ok");
+      flash(`✓ @${name} deleted (anonymized; their faxes were kept)`, "ok");
       await Promise.all([loadStats(), loadUsers(), loadFaxes()]);
     } else if (act === "delfax") {
-      if (!confirm(`Permanently delete transmission #${id} for both parties?`)) return;
+      if (!(await confirmBox(`Permanently delete transmission #${id} for both parties? This cannot be undone.`,
+        { title: "delete transmission", ok: "DELETE" }))) return;
       await api(`/api/admin/faxes/${id}/delete`, { method: "POST" });
       flash(`✓ deleted transmission #${id}`, "ok");
       await Promise.all([loadStats(), loadFaxes()]);
@@ -185,6 +288,7 @@ document.addEventListener("click", async (e) => {
   } catch (err) { onErr(err); }
 });
 
+$("admin-back").onclick = () => { location.href = "/"; };
 $("admin-refresh").onclick = () => refreshAll().catch(onErr);
 
 let searchTimer = null;
