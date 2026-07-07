@@ -8,14 +8,10 @@
 </head>
 <body>
 <div class="wrap">
-  <pre class="banner"> ______   _______  __   __  __   __  __   __  _______
-|      | |   _   ||  |_|  ||  |_|  ||  |_|  ||       |
-|   ___| |  |_|  ||       ||       ||       ||    ___|
-|  |___  |       ||       ||       ||       ||   |___
-|   ___| |       | |     |  |     |  |     | |    ___|
-|  |     |   _   || _   _ || _   _ || _   _ ||   |___
-|__|     |__| |__||__| |__||__| |__||__| |__||_______|</pre>
-  <p class="tag">// analog ghosts on a digital wire &mdash; fax your friends over the net &mdash; v0.1</p>
+  <header class="masthead">
+    <h1 class="wordmark">Faxx<span>Mee</span></h1>
+    <p class="tag">// analog ghosts on a digital wire &mdash; fax your friends over the net &mdash; v0.1</p>
+  </header>
 
   <!-- BOOT -->
   <section id="boot"><div id="bootlog"></div></section>
@@ -69,7 +65,7 @@
       </div>
       <div class="sb-actions">
         <button id="connect-usb">+ PRINTER</button>
-        <button id="print-test" class="ghost" disabled>TEST</button>
+        <button id="print-test" class="ghost hidden" disabled>TEST</button>
         <button type="button" id="sound-toggle" class="icon-btn" title="sound" aria-label="sound: on" aria-pressed="true">🔊</button>
         <button id="logout" class="danger">[ LOGOUT ]</button>
       </div>

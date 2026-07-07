@@ -59,13 +59,31 @@ body::after {   /* gentle vignette */
 }
 
 /* ---- header ---- */
-pre.banner {
-  color: var(--fg-bright); text-shadow: var(--glow-bright);
-  font-size: 12px; line-height: 1.1; margin: 0; white-space: pre; overflow-x: auto;
+.masthead { text-align: center; margin: 4px 0 22px; }
+.wordmark {
+  margin: 0; font-family: var(--mono); font-weight: 800;
+  font-size: clamp(42px, 13vw, 96px); line-height: 1.02;
+  letter-spacing: .06em; text-transform: none;
+  color: var(--fg-bright);
+  text-shadow:
+    0 0 2px  rgba(182,255,210,.95),
+    0 0 12px rgba(120,255,180,.55),
+    0 0 28px rgba(70,240,138,.45),
+    0 0 60px rgba(70,240,138,.28);
+  animation: wm-glow 3.4s ease-in-out infinite;
 }
+.wordmark span {           /* "Mee" — amber accent, with a gap after "Faxx" */
+  margin-left: .28em; color: var(--amber);
+  text-shadow:
+    0 0 2px  rgba(255,207,77,.9),
+    0 0 12px rgba(255,207,77,.5),
+    0 0 30px rgba(255,207,77,.30);
+}
+@keyframes wm-glow { 0%, 100% { opacity: .93; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .wordmark { animation: none; } }
 .tag {
   color: var(--fg-dim); text-shadow: var(--glow-dim);
-  margin: 10px 0 22px; font-size: 13.5px; letter-spacing: .3px;
+  text-align: center; margin: 12px 0 0; font-size: 13.5px; letter-spacing: .3px;
 }
 
 hr { border: none; border-top: 1px solid var(--line-soft); margin: 18px 0; }
@@ -130,13 +148,16 @@ button.ghost.armed {
 }
 button.ghost.armed:hover:not(:disabled) { background: var(--fg); color: #041008; text-shadow: none; }
 
-/* speaker icon toggle (status bar) — compact, no text label */
-button.icon-btn {
-  background: transparent; border-color: var(--line); color: var(--fg-bright);
-  text-shadow: none; line-height: 1; padding: 3px 8px;
+/* speaker icon toggle (status bar) — same boxed style as [ + PRINTER ] when on;
+   goes quiet/dim only when muted so the off-state still reads at a glance */
+button.icon-btn { line-height: 1; }
+button.icon-btn.muted {
+  background: transparent; border-color: var(--line-soft);
+  color: var(--fg-dim); text-shadow: none; opacity: .75;
 }
-button.icon-btn:hover:not(:disabled) { border-color: var(--fg); background: rgba(70,240,138,.08); box-shadow: none; }
-button.icon-btn.muted { color: var(--fg-dim); border-color: var(--line-soft); opacity: .7; }
+button.icon-btn.muted:hover:not(:disabled) {
+  border-color: var(--fg); color: var(--fg-bright); background: rgba(70,240,138,.06); box-shadow: none;
+}
 
 .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 /* keep the two printer buttons on one row; long label wraps inside its button if too narrow */

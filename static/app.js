@@ -616,8 +616,10 @@ function refreshPrinterPill() {
   else setPrinter("OFFLINE", "off");
   // CONNECT PRINTER (WebUSB) is only needed when nothing else prints for you
   $("connect-usb").classList.toggle("hidden", (nodeOnline || localBridge) && !usb);
-  // TEST works for whichever printer you have (browser USB, node, or bridge)
+  // TEST works for whichever printer you have (browser USB, node, or bridge).
+  // Hide it entirely when no printer is connected — keeps the actions row clean.
   const canPrint = !!(usb || nodeOnline || localBridge);
+  $("print-test").classList.toggle("hidden", !canPrint);
   $("print-test").disabled = !canPrint;
   $("print-test").classList.toggle("armed", canPrint);  // light it up once a printer is connected
 }
