@@ -100,6 +100,7 @@ All configuration is via environment variables:
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | per-sender rate limit: max faxes per N seconds (0 = off) |
+| `FAXXME_ADMIN_PASSWORD_HASH` | *(unset)* | sha256 hash of the `/admin` password; unset = admin disabled |
 | `FAXXME_FONT` | bundled Play (Google Fonts) | TTF used to render non-ASCII text (Vietnamese, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | font size for rendered Unicode text |
 | `FAXXME_FONT_THRESHOLD` | `176` | black/white cutoff for rendered text (higher = darker) |
@@ -118,6 +119,8 @@ All configuration is via environment variables:
 | GET | `/api/fax/{id}/image` | the dithered PNG (sender/recipient only) |
 | POST | `/api/token/regenerate` | issue a device token (shown once); revokes + kicks the old one |
 | POST | `/api/test-print` | print a test page on your node/bridge |
+| POST | `/api/admin/login` · `/api/admin/logout` | admin session (password → signed cookie; separate from user auth) |
+| GET | `/admin` · `/api/admin/*` | admin panel: paginated users + faxes, delete, revoke tokens, stats (admin cookie only) |
 | WS | `/ws` | presence + live delivery + status/node pushes; auth via **session cookie** (browser) or **`Authorization: Bearer <token>` + `X-Faxxme-User`** (agent) |
 | GET | `/healthz` | `{status, printer_bridge}` |
 | GET | `/` | the single-page CRT console |
@@ -176,6 +179,31 @@ sudo systemctl restart faxxme-agent
 ```
 
 Full guide: [agent/README.md](agent/README.md).
+
+## Admin panel
+
+The `/admin` panel is **completely separate from user accounts** — it's gated by a single
+password whose **sha256 hash** you put in `FAXXME_ADMIN_PASSWORD_HASH` (leave it unset to disable
+`/admin` entirely). No admin user, no extra DB table. Generate the hash and run:
+
+```bash
+# sha256 of your chosen admin password
+python3 -c "import hashlib;print(hashlib.sha256(b'my-admin-pass').hexdigest())"
+
+FAXXME_ADMIN_PASSWORD_HASH=<that hash> ./run.sh
+```
+
+Then open **`/admin`**, unlock with the password (its own signed session cookie), and you get a
+terminal-styled control room to:
+
+- see live **stats** (operators, online now, transmissions, queued/delivered, images);
+- browse **operators** (paginated, 20/page) with sent/received counts + online/node/token status,
+  **revoke a device token**, or **delete a user** (and every fax they sent or received);
+- browse/search **all transmissions** (paginated, 20/page), view attached images, and **delete any
+  fax** (both sides).
+
+The API under `/api/admin/*` checks the admin cookie server-side (`401` without it), so the page
+itself is harmless to serve.
 
 ## Run as a service (systemd)
 

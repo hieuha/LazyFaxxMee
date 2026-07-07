@@ -1,5 +1,6 @@
 """End-to-end-ish tests for FaxxMe: auth, fax queueing, delivery, local bridge, and WS flush."""
 import base64
+import hashlib
 import os
 import tempfile
 
@@ -9,6 +10,7 @@ _printfile = tempfile.mktemp(suffix=".prn")
 os.environ["FAXXME_PRINTER_DEV"] = _printfile
 os.environ["FAXXME_LOCAL_USER"] = "bob"  # bob has the wired-in printer
 os.environ["FAXXME_FAX_RATE_MAX"] = "0"  # rate limit off by default; one test enables it
+os.environ["FAXXME_ADMIN_PASSWORD_HASH"] = hashlib.sha256(b"s3cret-admin").hexdigest()  # /admin gate
 
 from fastapi.testclient import TestClient  # noqa: E402
 from faxxme import app as appmod, printer  # noqa: E402
@@ -323,3 +325,74 @@ def test_fax_rate_limit():
     assert codes[3] == 429 and codes[4] == 429  # then rate-limited
     A.FAX_RATE_MAX = 0                           # restore (off) for any other tests
     A._fax_hits.clear()
+
+
+# ---- admin panel (single hashed password in the env; no user account) ----
+
+ADMIN_PW = "s3cret-admin"
+
+
+def _admin_login(pw=ADMIN_PW):
+    return client.post("/api/admin/login", data={"password": pw})
+
+
+def _admin_logout():
+    return client.post("/api/admin/logout")
+
+
+def _admin_users(**params):
+    params.setdefault("limit", 200)
+    return client.get("/api/admin/users", params=params).json()["users"]
+
+
+def test_admin_login_and_access_control():
+    _admin_logout()                                          # ensure no admin cookie
+    assert client.get("/api/admin/stats").status_code == 401
+    # a logged-in normal user still has no admin access — admin is not a user account
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    assert client.get("/api/admin/stats").status_code == 401
+    assert "is_admin" not in client.get("/api/me").json()   # /api/me no longer carries admin
+    assert _admin_login("nope").status_code == 401          # wrong password
+    assert _admin_login().status_code == 200                # correct password -> cookie set
+    assert client.get("/api/admin/stats").status_code == 200
+    assert client.get("/admin").status_code == 200          # page HTML serves
+
+
+def test_admin_pagination_stats_and_management():
+    _admin_login()
+    s = client.get("/api/admin/stats").json()
+    assert "users" in s and "faxes" in s and "online" in s
+
+    # pagination: limit honored, a total is returned, offset moves the window
+    d = client.get("/api/admin/users", params={"limit": 1, "offset": 0}).json()
+    assert d["total"] >= 1 and len(d["users"]) <= 1
+    if d["total"] > 1:
+        first = d["users"][0]["id"]
+        second = client.get("/api/admin/users", params={"limit": 1, "offset": 1}).json()["users"][0]["id"]
+        assert first != second
+
+    # a throwaway user + fax the admin can see, filter, and delete
+    _reg("victim")
+    client.post("/api/login", data={"username": "victim", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "alice", "body": "trace this"})
+
+    hit = client.get("/api/admin/faxes", params={"q": "trace this"}).json()
+    assert hit["total"] >= 1 and all("trace" in f["body"] for f in hit["faxes"])
+    fid = hit["faxes"][0]["id"]
+    assert client.post(f"/api/admin/faxes/{fid}/delete").status_code == 200
+    assert client.post(f"/api/admin/faxes/{fid}/delete").status_code == 404  # already gone
+
+    vid = next(u for u in _admin_users() if u["username"] == "victim")["id"]
+    assert client.post(f"/api/admin/users/{vid}/delete").status_code == 200
+    assert "victim" not in [u["username"] for u in _admin_users()]
+    assert client.post("/api/login", data={"username": "victim", "password": "pw123456"}).status_code == 401
+
+
+def test_admin_revoke_token():
+    _admin_login()
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    client.post("/api/token/regenerate")
+    assert client.get("/api/me").json()["has_token"] is True
+    aid = next(u for u in _admin_users() if u["username"] == "alice")["id"]
+    assert client.post(f"/api/admin/users/{aid}/revoke-token").status_code == 200
+    assert next(u for u in _admin_users() if u["username"] == "alice")["has_token"] == 0

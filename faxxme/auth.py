@@ -7,6 +7,7 @@ import secrets
 
 _ITERATIONS = 200_000
 COOKIE_NAME = "fx_session"
+ADMIN_COOKIE = "fx_admin"
 
 _SECRET_PATH = os.environ.get("FAXXME_SECRET", os.path.join(os.path.dirname(__file__), "..", ".faxxme_secret"))
 
@@ -59,6 +60,26 @@ def new_device_token() -> str:
 def hash_token(token: str) -> str:
     """Store/compare device tokens as sha256 (they're high-entropy, so no slow KDF needed)."""
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+# ---- admin panel (single hashed password in the env, no DB user involved) ----
+
+def admin_password_hash(password: str) -> str:
+    """sha256 hex of the admin password — this is what's stored in FAXXME_ADMIN_PASSWORD_HASH."""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+def verify_admin_password(password: str, stored_hash: str) -> bool:
+    return hmac.compare_digest(admin_password_hash(password), (stored_hash or "").strip().lower())
+
+
+def make_admin_session() -> str:
+    """An opaque admin session value, signed with the server secret (not tied to any user)."""
+    return hmac.new(_SECRET, b"admin-session", hashlib.sha256).hexdigest()
+
+
+def valid_admin_session(value: str | None) -> bool:
+    return bool(value) and hmac.compare_digest(value, make_admin_session())
 
 
 def read_token(token: str | None) -> int | None:

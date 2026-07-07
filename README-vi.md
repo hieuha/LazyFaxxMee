@@ -101,6 +101,7 @@ Mọi cấu hình đều thông qua biến môi trường:
 | `FAXXME_IMG_MAX_H` | `1200` | chiều cao ảnh in tối đa (dot) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | dung lượng ảnh tải lên tối đa (byte, 6 MB) |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | giới hạn tần suất theo người gửi: tối đa N bản fax mỗi N giây (0 = tắt) |
+| `FAXXME_ADMIN_PASSWORD_HASH` | *(không đặt)* | hash sha256 của mật khẩu trang `/admin`; không đặt = tắt admin |
 | `FAXXME_FONT` | Play đóng kèm (Google Fonts) | TTF dùng để dựng chữ non-ASCII (tiếng Việt, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | cỡ font khi dựng chữ Unicode |
 | `FAXXME_FONT_THRESHOLD` | `176` | ngưỡng đen/trắng khi dựng chữ (cao hơn = đậm hơn) |
@@ -119,6 +120,8 @@ Mọi cấu hình đều thông qua biến môi trường:
 | GET | `/api/fax/{id}/image` | ảnh PNG đã dither (chỉ người gửi/người nhận) |
 | POST | `/api/token/regenerate` | cấp một device token (chỉ hiện một lần); thu hồi + ngắt token cũ |
 | POST | `/api/test-print` | in trang thử trên node/bridge của bạn |
+| POST | `/api/admin/login` · `/api/admin/logout` | phiên admin (mật khẩu → cookie ký; tách khỏi auth người dùng) |
+| GET | `/admin` · `/api/admin/*` | trang quản trị: người dùng + fax (phân trang), xóa, thu hồi token, thống kê (chỉ cookie admin) |
 | WS | `/ws` | presence + giao trực tiếp + đẩy trạng thái/node; xác thực bằng **cookie phiên** (trình duyệt) hoặc **`Authorization: Bearer <token>` + `X-Faxxme-User`** (agent) |
 | GET | `/healthz` | `{status, printer_bridge}` |
 | GET | `/` | trang console CRT đơn (SPA) |
@@ -177,6 +180,31 @@ sudo systemctl restart faxxme-agent
 ```
 
 Hướng dẫn đầy đủ: [agent/README-vi.md](agent/README-vi.md).
+
+## Trang quản trị (admin)
+
+Trang `/admin` **tách hoàn toàn khỏi tài khoản người dùng** — nó được bảo vệ bằng **một mật khẩu**
+mà bạn đặt **hash sha256** của nó vào `FAXXME_ADMIN_PASSWORD_HASH` (không đặt = tắt hẳn `/admin`).
+Không có tài khoản admin, không thêm bảng DB nào. Tạo hash rồi chạy:
+
+```bash
+# hash sha256 của mật khẩu admin bạn chọn
+python3 -c "import hashlib;print(hashlib.sha256(b'my-admin-pass').hexdigest())"
+
+FAXXME_ADMIN_PASSWORD_HASH=<hash đó> ./run.sh
+```
+
+Rồi mở **`/admin`**, mở khóa bằng mật khẩu (có cookie phiên ký riêng), bạn sẽ có một "phòng điều
+khiển" phong cách terminal để:
+
+- xem **thống kê** trực tiếp (số operator, đang online, số fax, đang chờ/đã giao, số ảnh);
+- duyệt **operator** (phân trang, 20/trang) kèm số fax gửi/nhận + trạng thái online/node/token,
+  **thu hồi device token**, hoặc **xóa một người dùng** (và mọi bản fax họ gửi hoặc nhận);
+- duyệt/tìm **toàn bộ tin nhắn (fax)** (phân trang, 20/trang), xem ảnh đính kèm, và **xóa bất kỳ
+  bản fax nào** (cả hai phía).
+
+API dưới `/api/admin/*` kiểm tra cookie admin ở phía máy chủ (không có cookie → `401`), nên bản thân
+trang đó phục vụ ra ngoài là vô hại.
 
 ## Chạy như một dịch vụ (systemd)
 

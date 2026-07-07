@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FaxxMe // admin</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <h1 class="wordmark">Faxx<span>Mee</span></h1>
+    <p class="tag">// control room — operators &amp; transmissions</p>
+  </header>
+
+  <!-- LOADING -->
+  <section id="admin-loading"><p class="small block">> checking session…</p></section>
+
+  <!-- LOGIN -->
+  <section id="admin-login" class="hidden">
+    <hr>
+    <form id="admin-login-form">
+      <div class="field">
+        <label for="admin-pass">admin password</label>
+        <div class="prompt-line"><input id="admin-pass" type="password" autocomplete="current-password"
+             placeholder="enter the admin passphrase"></div>
+      </div>
+      <div class="msg" id="admin-login-msg"></div>
+      <button type="submit">UNLOCK &raquo;</button>
+      <a class="backlink" href="/" style="margin-left:12px">« back to console</a>
+    </form>
+    <p class="small block" id="admin-disabled-note" style="display:none">
+      The admin panel is disabled. Set <code>FAXXME_ADMIN_PASSWORD_HASH</code> on the server
+      (sha256 of your password) and restart.</p>
+  </section>
+
+  <!-- ADMIN CONSOLE -->
+  <section id="admin" class="hidden">
+    <div class="statusbar">
+      <div class="sb-greeting">ADMIN &middot; <span class="on">authenticated</span></div>
+      <div class="sb-actions">
+        <a class="backlink" href="/">« console</a>
+        <button id="admin-refresh" class="ghost">↻ REFRESH</button>
+        <button id="admin-logout" class="danger">[ LOCK ]</button>
+      </div>
+    </div>
+    <div class="msg info hidden" id="admin-msg"></div>
+
+    <div class="stats" id="stats"></div>
+
+    <h2>:: OPERATORS <span class="small" id="users-count"></span></h2>
+    <div class="tablewrap"><table class="admin" id="users-table">
+      <thead><tr>
+        <th>callsign</th><th>name</th><th>joined</th><th>status</th>
+        <th class="num">sent</th><th class="num">recv</th><th>actions</th>
+      </tr></thead>
+      <tbody id="users-body"></tbody>
+    </table></div>
+    <div class="pager" id="users-pager"></div>
+
+    <h2>:: TRANSMISSIONS <span class="small" id="faxes-count"></span></h2>
+    <div class="row">
+      <div class="prompt-line" style="flex:1">
+        <input id="fax-search" placeholder="filter by callsign or message text…" autocomplete="off">
+      </div>
+    </div>
+    <div class="tablewrap"><table class="admin" id="faxes-table">
+      <thead><tr>
+        <th class="num">#</th><th>from → to</th><th>time</th><th>status</th><th>message</th><th>actions</th>
+      </tr></thead>
+      <tbody id="faxes-body"></tbody>
+    </table></div>
+    <div class="pager" id="faxes-pager"></div>
+  </section>
+
+  <footer class="footer">
+    <a href="https://github.com/hieuha/LazyFaxxMee" target="_blank" rel="noopener noreferrer">[ POWERED BY LAZYFAXXMEE ON GITHUB ↗ ]</a>
+  </footer>
+</div>
+
+<script src="/static/admin.js"></script>
+</body>
+</html>

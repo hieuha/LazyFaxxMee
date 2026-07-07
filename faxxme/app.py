@@ -21,6 +21,14 @@ FAX_RATE_MAX = int(os.environ.get("FAXXME_FAX_RATE_MAX", "20"))         # max fa
 FAX_RATE_WINDOW = float(os.environ.get("FAXXME_FAX_RATE_WINDOW", "60"))  # window, seconds
 _fax_hits: dict[int, list[float]] = {}
 
+# /admin panel is gated by a single hashed password in the env — fully separate from user
+# accounts. Set FAXXME_ADMIN_PASSWORD_HASH to sha256(password).hexdigest(); unset = disabled.
+ADMIN_PASSWORD_HASH = os.environ.get("FAXXME_ADMIN_PASSWORD_HASH", "").strip().lower()
+
+
+def admin_enabled() -> bool:
+    return bool(ADMIN_PASSWORD_HASH)
+
 
 def _rate_ok(user_id: int) -> bool:
     """Sliding-window rate check per sender; records a hit when allowed."""
@@ -94,6 +102,9 @@ class Presence:
     def agent_sockets(self, user_id: int) -> list[WebSocket]:
         return list(self._agents.get(user_id, ()))
 
+    def online_count(self) -> int:
+        return len(self._sockets)
+
 
 presence = Presence()
 
@@ -111,6 +122,12 @@ def require_user(request: Request) -> dict:
     if not user:
         raise HTTPException(status_code=401, detail="not authenticated")
     return user
+
+
+def require_admin(request: Request) -> None:
+    """Admin auth is a signed cookie set by /api/admin/login — no user account involved."""
+    if not auth.valid_admin_session(request.cookies.get(auth.ADMIN_COOKIE)):
+        raise HTTPException(status_code=401, detail="admin authentication required")
 
 
 def render_escpos(fax: dict) -> bytes:
@@ -400,6 +417,114 @@ async def test_print(request: Request):
 
 
 # --------------------------------------------------------------------------- #
+#  Admin API (single hashed password in FAXXME_ADMIN_PASSWORD_HASH)             #
+# --------------------------------------------------------------------------- #
+def _set_admin_session(resp: Response, secure: bool) -> None:
+    resp.set_cookie(
+        auth.ADMIN_COOKIE, auth.make_admin_session(),
+        httponly=True, samesite="lax", secure=secure,
+        max_age=60 * 60 * 12, path="/",
+    )
+
+
+@app.post("/api/admin/login")
+async def admin_login(request: Request, password: str = Form(...)):
+    if not admin_enabled():
+        raise HTTPException(403, "admin panel is disabled (set FAXXME_ADMIN_PASSWORD_HASH)")
+    if not auth.verify_admin_password(password, ADMIN_PASSWORD_HASH):
+        raise HTTPException(401, "wrong admin password")
+    resp = JSONResponse({"ok": True})
+    _set_admin_session(resp, secure=request.url.scheme == "https")
+    return resp
+
+
+@app.post("/api/admin/logout")
+async def admin_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.ADMIN_COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/admin/stats")
+async def admin_stats(request: Request):
+    require_admin(request)
+    stats = db.admin_stats()
+    stats["online"] = presence.online_count()
+    return stats
+
+
+@app.get("/api/admin/users")
+async def admin_users(request: Request, limit: int = 20, offset: int = 0):
+    require_admin(request)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    out = []
+    for u in db.admin_list_users(limit, offset):
+        out.append({
+            **u,
+            "online": presence.online(u["id"]),
+            "node_online": presence.node_online(u["id"]),
+        })
+    return {"users": out, "total": db.admin_count_users()}
+
+
+@app.post("/api/admin/users/{user_id}/delete")
+async def admin_delete_user(user_id: int, request: Request):
+    require_admin(request)
+    if not db.get_user(user_id):
+        raise HTTPException(404, "no such user")
+    # drop any live browser/agent sockets this user has open
+    for ws in presence.sockets(user_id):
+        try:
+            await ws.close(code=4403)
+        except Exception:
+            pass
+    db.delete_user(user_id)
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{user_id}/revoke-token")
+async def admin_revoke_token(user_id: int, request: Request):
+    require_admin(request)
+    if not db.get_user(user_id):
+        raise HTTPException(404, "no such user")
+    db.clear_user_token(user_id)
+    for ws in presence.agent_sockets(user_id):   # kick the agent so revocation is immediate
+        try:
+            await ws.close(code=4401)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+@app.get("/api/admin/faxes")
+async def admin_faxes(request: Request, q: str = "", limit: int = 20, offset: int = 0):
+    require_admin(request)
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    q = q.strip()
+    return {"faxes": db.admin_all_faxes(q, limit, offset), "total": db.admin_count_faxes(q)}
+
+
+@app.post("/api/admin/faxes/{fax_id}/delete")
+async def admin_delete_fax(fax_id: int, request: Request):
+    require_admin(request)
+    if not db.admin_delete_fax(fax_id):
+        raise HTTPException(404, "no such fax")
+    return {"ok": True}
+
+
+@app.get("/api/admin/faxes/{fax_id}/image")
+async def admin_fax_image(fax_id: int, request: Request):
+    require_admin(request)
+    fax = db.get_fax(fax_id)
+    if not fax or not fax.get("image"):
+        raise HTTPException(404, "no image")
+    return Response(content=fax["image"], media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=3600"})
+
+
+# --------------------------------------------------------------------------- #
 #  WebSocket: presence + live delivery                                          #
 # --------------------------------------------------------------------------- #
 def _ws_authenticate(ws: WebSocket) -> dict | None:
@@ -472,7 +597,7 @@ async def healthz():
 
 def _asset_version() -> int:
     ver = 0
-    for f in ("app.js", "style.css"):
+    for f in ("app.js", "style.css", "admin.js"):
         try:
             ver = max(ver, int(os.path.getmtime(os.path.join(STATIC_DIR, f))))
         except OSError:
@@ -480,15 +605,25 @@ def _asset_version() -> int:
     return ver
 
 
-@app.get("/")
-async def index():
-    with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as fh:
+def _serve_page(filename: str) -> HTMLResponse:
+    with open(os.path.join(STATIC_DIR, filename), encoding="utf-8") as fh:
         html = fh.read()
     # cache-bust JS/CSS by their mtime so a deploy takes effect without a CDN purge
     ver = _asset_version()
-    html = (html.replace("/static/app.js", f"/static/app.js?v={ver}")
-                .replace("/static/style.css", f"/static/style.css?v={ver}"))
+    for asset in ("app.js", "admin.js", "style.css"):
+        html = html.replace(f"/static/{asset}", f"/static/{asset}?v={ver}")
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/")
+async def index():
+    return _serve_page("index.html")
+
+
+@app.get("/admin")
+async def admin_page():
+    # The page loads for anyone; its data calls hit /api/admin/* which enforce admin.
+    return _serve_page("admin.html")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

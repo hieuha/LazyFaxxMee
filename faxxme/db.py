@@ -237,3 +237,93 @@ def outbox(sender_id: int, limit: int = 50) -> list[dict]:
             (sender_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---- admin ----
+
+def clear_user_token(user_id: int) -> None:
+    """Revoke a user's device token (used by the admin panel)."""
+    with _lock:
+        _c().execute("UPDATE users SET token_hash=NULL WHERE id=?", (user_id,))
+        _c().commit()
+
+
+def delete_user(user_id: int) -> None:
+    """Remove a user and every fax they sent or received (foreign keys are ON)."""
+    with _lock:
+        _c().execute("DELETE FROM faxes WHERE sender_id=? OR recipient_id=?", (user_id, user_id))
+        _c().execute("DELETE FROM users WHERE id=?", (user_id,))
+        _c().commit()
+
+
+def admin_delete_fax(fax_id: int) -> int:
+    """Hard-delete a single fax regardless of the per-side soft-delete flags."""
+    with _lock:
+        cur = _c().execute("DELETE FROM faxes WHERE id=?", (fax_id,))
+        _c().commit()
+        return cur.rowcount
+
+
+def admin_list_users(limit: int = 20, offset: int = 0) -> list[dict]:
+    """A page of users with sent/received counts and whether a device token is set."""
+    with _lock:
+        rows = _c().execute(
+            """SELECT u.id, u.username, u.display_name, u.created_at,
+                      (u.token_hash IS NOT NULL) AS has_token,
+                      (SELECT COUNT(*) FROM faxes f WHERE f.sender_id=u.id)    AS sent,
+                      (SELECT COUNT(*) FROM faxes f WHERE f.recipient_id=u.id) AS received
+               FROM users u ORDER BY u.created_at LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def admin_count_users() -> int:
+    with _lock:
+        return _c().execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+
+def admin_count_faxes(q: str = "") -> int:
+    like = f"%{q}%"
+    with _lock:
+        return _c().execute(
+            """SELECT COUNT(*) FROM faxes f
+               JOIN users s ON s.id=f.sender_id
+               JOIN users r ON r.id=f.recipient_id
+               WHERE (?='' OR f.body LIKE ? OR s.username LIKE ? OR r.username LIKE ?)""",
+            (q, like, like, like),
+        ).fetchone()[0]
+
+
+def admin_stats() -> dict:
+    with _lock:
+        c = _c()
+        one = lambda q: c.execute(q).fetchone()[0]  # noqa: E731
+        return {
+            "users":     one("SELECT COUNT(*) FROM users"),
+            "faxes":     one("SELECT COUNT(*) FROM faxes"),
+            "pending":   one("SELECT COUNT(*) FROM faxes WHERE status='pending'"),
+            "delivered": one("SELECT COUNT(*) FROM faxes WHERE status='delivered'"),
+            "images":    one("SELECT COUNT(*) FROM faxes WHERE image IS NOT NULL"),
+        }
+
+
+def admin_all_faxes(q: str = "", limit: int = 200, offset: int = 0) -> list[dict]:
+    """All faxes (both sides), newest first, with sender/recipient names. Optional
+    substring filter `q` matches the body or either party's callsign."""
+    like = f"%{q}%"
+    with _lock:
+        rows = _c().execute(
+            """SELECT f.id, f.body, f.created_at, f.status, f.delivered_at,
+                      (f.image IS NOT NULL) AS has_image,
+                      f.sender_deleted, f.recipient_deleted,
+                      s.username AS sender_name,    s.display_name AS sender_display,
+                      r.username AS recipient_name, r.display_name AS recipient_display
+               FROM faxes f
+               JOIN users s ON s.id=f.sender_id
+               JOIN users r ON r.id=f.recipient_id
+               WHERE (?='' OR f.body LIKE ? OR s.username LIKE ? OR r.username LIKE ?)
+               ORDER BY f.created_at DESC LIMIT ? OFFSET ?""",
+            (q, like, like, like, limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows]
