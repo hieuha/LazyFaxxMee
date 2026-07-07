@@ -114,7 +114,8 @@ presence = Presence()
 # --------------------------------------------------------------------------- #
 def current_user(request: Request) -> dict | None:
     uid = auth.read_token(request.cookies.get(auth.COOKIE_NAME))
-    return db.get_user(uid) if uid else None
+    user = db.get_user(uid) if uid else None
+    return user if user and not user.get("deleted_at") else None   # tombstoned -> logged out everywhere
 
 
 def require_user(request: Request) -> dict:
@@ -241,6 +242,8 @@ async def register(request: Request, username: str = Form(...), password: str = 
     username = username.strip().lower()
     if not _USERNAME_RE.fullmatch(username):
         raise HTTPException(400, "username must be 2-24 chars: a-z, 0-9, underscore")
+    if username.startswith("deleted_"):    # reserved for tombstoned accounts
+        raise HTTPException(400, "that callsign prefix is reserved")
     if len(password) < 8:
         raise HTTPException(400, "password too short (min 8)")
     if db.get_user_by_name(username):
@@ -348,7 +351,7 @@ async def send_fax(request: Request, to: str = Form(""), body: str = Form(""),
         raise HTTPException(400, "empty message (add text or an image)")
 
     recipient = db.get_user_by_name(to)
-    if not recipient:
+    if not recipient or recipient.get("deleted_at"):
         raise HTTPException(404, "no such callsign")
     if recipient["id"] == sender["id"]:
         raise HTTPException(400, "you can't fax yourself — pick a friend's callsign")
@@ -470,8 +473,11 @@ async def admin_users(request: Request, limit: int = 20, offset: int = 0):
 
 @app.post("/api/admin/users/{user_id}/delete")
 async def admin_delete_user(user_id: int, request: Request):
+    """Tombstone (anonymize) a user: their faxes survive for the other party, the account can no
+    longer log in, its device token is revoked, and the callsign is freed."""
     require_admin(request)
-    if not db.get_user(user_id):
+    target = db.get_user(user_id)
+    if not target or target.get("deleted_at"):
         raise HTTPException(404, "no such user")
     # drop any live browser/agent sockets this user has open
     for ws in presence.sockets(user_id):
@@ -479,7 +485,7 @@ async def admin_delete_user(user_id: int, request: Request):
             await ws.close(code=4403)
         except Exception:
             pass
-    db.delete_user(user_id)
+    db.tombstone_user(user_id)
     return {"ok": True}
 
 
@@ -538,7 +544,8 @@ def _ws_authenticate(ws: WebSocket) -> dict | None:
         if u:
             return u
     uid = auth.read_token(ws.cookies.get(auth.COOKIE_NAME))
-    return db.get_user(uid) if uid else None
+    user = db.get_user(uid) if uid else None
+    return user if user and not user.get("deleted_at") else None
 
 
 async def _broadcast_node(user_id: int, online: bool) -> None:

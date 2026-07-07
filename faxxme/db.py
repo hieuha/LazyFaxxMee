@@ -30,7 +30,8 @@ def init() -> None:
                 pass_hash    TEXT NOT NULL,
                 salt         TEXT NOT NULL,
                 created_at   REAL NOT NULL,
-                token_hash   TEXT              -- sha256 of the device/API token, or NULL
+                token_hash   TEXT,             -- sha256 of the device/API token, or NULL
+                deleted_at   REAL              -- tombstone timestamp (anonymized), or NULL if active
             );
             CREATE TABLE IF NOT EXISTS faxes (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,6 +60,8 @@ def init() -> None:
         have_u = {r[1] for r in _conn.execute("PRAGMA table_info(users)").fetchall()}
         if "token_hash" not in have_u:
             _conn.execute("ALTER TABLE users ADD COLUMN token_hash TEXT")
+        if "deleted_at" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN deleted_at REAL")
         # normalize any legacy non-lowercase usernames (idempotent; skip if it would collide)
         for uid, uname in _conn.execute(
                 "SELECT id, username FROM users WHERE username <> lower(username)").fetchall():
@@ -122,7 +125,7 @@ def get_user_by_token_hash(username: str, token_hash: str) -> dict | None:
 def list_users() -> list[dict]:
     with _lock:
         rows = _c().execute(
-            "SELECT id, username, display_name FROM users ORDER BY username"
+            "SELECT id, username, display_name FROM users WHERE deleted_at IS NULL ORDER BY username"
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -248,11 +251,17 @@ def clear_user_token(user_id: int) -> None:
         _c().commit()
 
 
-def delete_user(user_id: int) -> None:
-    """Remove a user and every fax they sent or received (foreign keys are ON)."""
+def tombstone_user(user_id: int) -> None:
+    """Anonymize a user **in place** instead of deleting them, so every fax survives for the
+    other party (foreign keys stay valid). The account can no longer log in (password wiped),
+    its device token is revoked, and the original callsign is freed for re-registration.
+    Historical faxes then show the sender/recipient as `deleted_<id>`."""
     with _lock:
-        _c().execute("DELETE FROM faxes WHERE sender_id=? OR recipient_id=?", (user_id, user_id))
-        _c().execute("DELETE FROM users WHERE id=?", (user_id,))
+        _c().execute(
+            "UPDATE users SET username=?, display_name=?, pass_hash='', salt='', "
+            "token_hash=NULL, deleted_at=? WHERE id=?",
+            (f"deleted_{user_id}", "(deleted operator)", time.time(), user_id),
+        )
         _c().commit()
 
 
@@ -272,7 +281,7 @@ def admin_list_users(limit: int = 20, offset: int = 0) -> list[dict]:
                       (u.token_hash IS NOT NULL) AS has_token,
                       (SELECT COUNT(*) FROM faxes f WHERE f.sender_id=u.id)    AS sent,
                       (SELECT COUNT(*) FROM faxes f WHERE f.recipient_id=u.id) AS received
-               FROM users u ORDER BY u.created_at LIMIT ? OFFSET ?""",
+               FROM users u WHERE u.deleted_at IS NULL ORDER BY u.created_at LIMIT ? OFFSET ?""",
             (limit, offset),
         ).fetchall()
         return [dict(r) for r in rows]
@@ -280,7 +289,7 @@ def admin_list_users(limit: int = 20, offset: int = 0) -> list[dict]:
 
 def admin_count_users() -> int:
     with _lock:
-        return _c().execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        return _c().execute("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").fetchone()[0]
 
 
 def admin_count_faxes(q: str = "") -> int:
@@ -300,7 +309,7 @@ def admin_stats() -> dict:
         c = _c()
         one = lambda q: c.execute(q).fetchone()[0]  # noqa: E731
         return {
-            "users":     one("SELECT COUNT(*) FROM users"),
+            "users":     one("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"),
             "faxes":     one("SELECT COUNT(*) FROM faxes"),
             "pending":   one("SELECT COUNT(*) FROM faxes WHERE status='pending'"),
             "delivered": one("SELECT COUNT(*) FROM faxes WHERE status='delivered'"),

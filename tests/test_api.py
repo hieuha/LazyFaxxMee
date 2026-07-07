@@ -396,3 +396,182 @@ def test_admin_revoke_token():
     aid = next(u for u in _admin_users() if u["username"] == "alice")["id"]
     assert client.post(f"/api/admin/users/{aid}/revoke-token").status_code == 200
     assert next(u for u in _admin_users() if u["username"] == "alice")["has_token"] == 0
+
+
+def test_admin_fax_image_endpoint():
+    # a user sends one fax WITH an image and one text-only
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "bob", "body": "pic for admin"},
+                files={"image": ("g.png", _png(), "image/png")})
+    img_fid = client.get("/api/outbox").json()["faxes"][0]["id"]
+    client.post("/api/fax", data={"to": "bob", "body": "text only, no image"})
+    txt_fid = client.get("/api/outbox").json()["faxes"][0]["id"]
+
+    _admin_login()
+    ir = client.get(f"/api/admin/faxes/{img_fid}/image")
+    assert ir.status_code == 200 and ir.headers["content-type"] == "image/png"
+    assert ir.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert client.get(f"/api/admin/faxes/{txt_fid}/image").status_code == 404  # no image on that fax
+
+    _admin_logout()
+    assert client.get(f"/api/admin/faxes/{img_fid}/image").status_code == 401  # gated by admin cookie
+
+
+def test_admin_delete_user_tombstones_and_keeps_faxes():
+    _admin_login()
+    _reg("ghost")
+    client.post("/api/login", data={"username": "ghost", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "alice", "body": "survive me"})
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    assert any(f["body"] == "survive me" for f in client.get("/api/inbox").json()["faxes"])
+
+    # admin "deletes" ghost -> tombstone
+    gid = next(u for u in _admin_users() if u["username"] == "ghost")["id"]
+    assert client.post(f"/api/admin/users/{gid}/delete").status_code == 200
+    # ghost vanishes from the roster and can no longer log in
+    assert "ghost" not in [u["username"] for u in _admin_users()]
+    assert client.post("/api/login", data={"username": "ghost", "password": "pw123456"}).status_code == 401
+
+    # …but the fax survives, now attributed to a deleted_* callsign, and alice still holds it
+    fx = client.get("/api/admin/faxes", params={"q": "survive me"}).json()["faxes"]
+    assert fx and fx[0]["sender_name"].startswith("deleted_")
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    assert any(f["body"] == "survive me" for f in client.get("/api/inbox").json()["faxes"])
+    # the tombstoned account isn't offered as a recipient, and its old callsign is free again
+    assert not any(u["username"].startswith("deleted_") for u in client.get("/api/users").json()["users"])
+    assert client.post("/api/register", data={"username": "ghost", "password": "pw123456"}).status_code == 200
+
+
+def test_register_rejects_reserved_prefix():
+    assert client.post("/api/register",
+                       data={"username": "deleted_9", "password": "pw123456"}).status_code == 400
+
+
+# ---- admin: thorough edge cases + end-to-end ----
+
+def test_admin_cookie_tampered_rejected():
+    _admin_logout()
+    client.cookies.set("fx_admin", "not-a-real-signature")
+    assert client.get("/api/admin/stats").status_code == 401
+    client.cookies.delete("fx_admin")
+
+
+def test_admin_login_disabled_returns_403():
+    saved = appmod.ADMIN_PASSWORD_HASH
+    appmod.ADMIN_PASSWORD_HASH = ""            # simulate FAXXME_ADMIN_PASSWORD_HASH unset
+    try:
+        _admin_logout()
+        assert client.post("/api/admin/login", data={"password": "anything"}).status_code == 403
+    finally:
+        appmod.ADMIN_PASSWORD_HASH = saved
+
+
+def test_admin_pagination_clamps_and_bounds():
+    _admin_login()
+    assert len(client.get("/api/admin/users", params={"limit": 9999}).json()["users"]) <= 200  # clamp hi
+    assert len(client.get("/api/admin/users", params={"limit": 0}).json()["users"]) <= 1        # clamp lo
+    beyond = client.get("/api/admin/users", params={"limit": 20, "offset": 100000}).json()
+    assert beyond["users"] == [] and beyond["total"] >= 1                                       # offset past end
+    assert len(client.get("/api/admin/faxes", params={"limit": 9999}).json()["faxes"]) <= 200
+
+
+def test_admin_faxes_search_variants():
+    _admin_login()
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "bob", "body": "ZQXmarker payload"})
+    assert client.get("/api/admin/faxes", params={"q": "ZQXmarker"}).json()["total"] >= 1        # by body
+    assert client.get("/api/admin/faxes", params={"q": "alice"}).json()["total"] >= 1            # by callsign
+    assert client.get("/api/admin/faxes", params={"q": "no-such-marker-xyz"}).json()["total"] == 0  # no match
+
+
+def test_admin_nonexistent_targets_404():
+    _admin_login()
+    assert client.get("/api/admin/faxes/999999/image").status_code == 404
+    assert client.post("/api/admin/faxes/999999/delete").status_code == 404
+    assert client.post("/api/admin/users/999999/delete").status_code == 404
+    assert client.post("/api/admin/users/999999/revoke-token").status_code == 404
+
+
+def test_tombstone_multiparty_keeps_all_copies():
+    for u in ("hub", "peera", "peerb"):
+        _reg(u)
+    client.post("/api/login", data={"username": "hub", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "peera", "body": "hub-to-A"})
+    client.post("/api/login", data={"username": "peerb", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "hub", "body": "B-to-hub"})
+
+    _admin_login()
+    hid = next(u for u in _admin_users() if u["username"] == "hub")["id"]
+    assert client.post(f"/api/admin/users/{hid}/delete").status_code == 200
+    bodies = [f["body"] for f in client.get("/api/admin/faxes", params={"limit": 200}).json()["faxes"]]
+    assert "hub-to-A" in bodies and "B-to-hub" in bodies                 # both survive
+    client.post("/api/login", data={"username": "peera", "password": "pw123456"})
+    assert any(f["body"] == "hub-to-A" for f in client.get("/api/inbox").json()["faxes"])
+    client.post("/api/login", data={"username": "peerb", "password": "pw123456"})
+    assert any(f["body"] == "B-to-hub" for f in client.get("/api/outbox").json()["faxes"])
+
+
+def test_tombstone_revokes_device_token():
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    _reg("agz")
+    client.post("/api/login", data={"username": "agz", "password": "pw123456"})
+    tok = client.post("/api/token/regenerate").json()["token"]
+    client.post("/api/logout")
+    hdrs = {"Authorization": f"Bearer {tok}", "X-Faxxme-User": "agz"}
+    with client.websocket_connect("/ws", headers=hdrs) as ws:   # token works before tombstone
+        assert ws.receive_json()["type"] == "hello"
+    _admin_login()
+    uid = next(u for u in _admin_users() if u["username"] == "agz")["id"]
+    client.post(f"/api/admin/users/{uid}/delete")
+    with pytest.raises(WebSocketDisconnect):                     # old token can't reconnect
+        with client.websocket_connect("/ws", headers=hdrs) as ws:
+            ws.receive_json()
+
+
+def test_tombstone_invalidates_existing_session():
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+    _reg("liveusr")
+    client.post("/api/login", data={"username": "liveusr", "password": "pw123456"})
+    assert client.get("/api/me").status_code == 200
+    _admin_login()                                              # fx_admin set; fx_session still = liveusr
+    uid = next(u for u in _admin_users() if u["username"] == "liveusr")["id"]
+    assert client.post(f"/api/admin/users/{uid}/delete").status_code == 200
+    # the still-present session cookie no longer authenticates anywhere
+    assert client.get("/api/me").status_code == 401
+    assert client.post("/api/fax", data={"to": "alice", "body": "nope"}).status_code == 401
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+
+
+def test_cannot_fax_tombstoned_callsign():
+    _reg("tombx")
+    client.post("/api/login", data={"username": "tombx", "password": "pw123456"})
+    _admin_login()
+    uid = next(u for u in _admin_users() if u["username"] == "tombx")["id"]
+    client.post(f"/api/admin/users/{uid}/delete")
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    assert client.post("/api/fax", data={"to": f"deleted_{uid}", "body": "x"}).status_code == 404
+    assert client.post("/api/fax", data={"to": "tombx", "body": "x"}).status_code == 404   # freed, no user
+
+
+def test_reregister_freed_callsign_is_new_identity():
+    _reg("recyc")
+    client.post("/api/login", data={"username": "recyc", "password": "pw123456"})
+    client.post("/api/fax", data={"to": "alice", "body": "old-recyc-msg"})
+    _admin_login()
+    old_id = next(u for u in _admin_users() if u["username"] == "recyc")["id"]
+    client.post(f"/api/admin/users/{old_id}/delete")
+    assert client.post("/api/register", data={"username": "recyc", "password": "pw123456"}).status_code == 200
+    new_id = next(u for u in _admin_users() if u["username"] == "recyc")["id"]
+    assert new_id != old_id                                     # a brand-new account
+    fx = client.get("/api/admin/faxes", params={"q": "old-recyc-msg"}).json()["faxes"]
+    assert fx and fx[0]["sender_name"] == f"deleted_{old_id}"    # old fax stays with the tombstone
+
+
+def test_register_reserved_prefix_variants():
+    assert client.post("/api/register", data={"username": "deleted_1", "password": "pw123456"}).status_code == 400
+    assert client.post("/api/register", data={"username": "deleted_abc", "password": "pw123456"}).status_code == 400
+    assert client.post("/api/register", data={"username": "notdeleted", "password": "pw123456"}).status_code == 200
