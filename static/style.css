@@ -123,6 +123,21 @@ button.ghost:hover:not(:disabled) { border-color: var(--fg); color: var(--fg-bri
 button.danger { background: transparent; border-color: var(--red); color: var(--red); text-shadow: var(--glow-red); }
 button.danger:hover:not(:disabled) { background: var(--red); color: #180404; text-shadow: none; box-shadow: 0 0 10px rgba(255,107,107,.45); }
 
+/* TEST button lights up once a printer is connected (ghost → bright, glowing) */
+button.ghost.armed {
+  border-color: var(--fg); color: var(--fg-bright); text-shadow: var(--glow-bright);
+  background: rgba(70,240,138,.10); box-shadow: 0 0 8px rgba(70,240,138,.28);
+}
+button.ghost.armed:hover:not(:disabled) { background: var(--fg); color: #041008; text-shadow: none; }
+
+/* speaker icon toggle (status bar) — compact, no text label */
+button.icon-btn {
+  background: transparent; border-color: var(--line); color: var(--fg-bright);
+  text-shadow: none; line-height: 1; padding: 3px 8px;
+}
+button.icon-btn:hover:not(:disabled) { border-color: var(--fg); background: rgba(70,240,138,.08); box-shadow: none; }
+button.icon-btn.muted { color: var(--fg-dim); border-color: var(--line-soft); opacity: .7; }
+
 .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 /* keep the two printer buttons on one row; long label wraps inside its button if too narrow */
 .printer-actions { flex-wrap: nowrap; }

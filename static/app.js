@@ -73,7 +73,13 @@ document.addEventListener("pointerdown", () => { if (soundOn) ac(); }, { once: t
 {
   const btn = $("sound-toggle");
   if (btn) {
-    const paint = () => { btn.textContent = soundOn ? "♪ sound: on" : "♪ sound: off"; };
+    const paint = () => {
+      btn.textContent = soundOn ? "🔊" : "🔇";
+      btn.title = soundOn ? "sound: on" : "sound: muted";
+      btn.setAttribute("aria-label", btn.title);
+      btn.setAttribute("aria-pressed", soundOn ? "true" : "false");
+      btn.classList.toggle("muted", !soundOn);
+    };
     paint();
     btn.onclick = () => {
       soundOn = !soundOn;
@@ -171,7 +177,7 @@ async function enterConsole(m) {
   if (m.local_bridge) {
     // This callsign owns a printer wired directly into the server host.
     $("connect-usb").classList.add("ghost");
-    $("connect-usb").innerHTML = "▸ PRINTER (optional)";
+    $("connect-usb").innerHTML = "+ PRINTER";
     $("connect-usb").title = "this host already prints via its wired printer";
     $("local-note").innerHTML =
       "▲ <b>this host has a printer wired in.</b> Faxes to @" + ME.username +
@@ -611,7 +617,9 @@ function refreshPrinterPill() {
   // CONNECT PRINTER (WebUSB) is only needed when nothing else prints for you
   $("connect-usb").classList.toggle("hidden", (nodeOnline || localBridge) && !usb);
   // TEST works for whichever printer you have (browser USB, node, or bridge)
-  $("print-test").disabled = !(usb || nodeOnline || localBridge);
+  const canPrint = !!(usb || nodeOnline || localBridge);
+  $("print-test").disabled = !canPrint;
+  $("print-test").classList.toggle("armed", canPrint);  // light it up once a printer is connected
 }
 
 // Bind a USB device as the printer. announce=true surfaces detailed errors (manual click);
