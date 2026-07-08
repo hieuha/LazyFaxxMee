@@ -205,8 +205,9 @@ so the stakes are low; still, protect DB access and backups accordingly.
 
 ### Administration (server operator)
 
-- Deleting a user (admin panel *tombstone*) anonymizes the account and drops its secret, so its
-  webhook stops working.
+- Deleting a user (admin panel *tombstone*) anonymizes the account and clears its webhook secret
+  (and device token); a tombstoned account is also filtered out of webhook lookups, so its
+  webhook stops working immediately.
 - The `webhook` sender is a **reserved system account**: it's created on the first inbound fax,
   can't be logged into, and is hidden from the callsign picker. Nobody can register `webhook`.
 - Inbound faxes appear in the recipient's inbox and in the admin fax list like any other fax, with

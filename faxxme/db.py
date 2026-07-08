@@ -345,12 +345,12 @@ def clear_user_token(user_id: int) -> None:
 def tombstone_user(user_id: int) -> None:
     """Anonymize a user **in place** instead of deleting them, so every fax survives for the
     other party (foreign keys stay valid). The account can no longer log in (password wiped),
-    its device token is revoked, and the original callsign is freed for re-registration.
-    Historical faxes then show the sender/recipient as `deleted_<id>`."""
+    its device token AND webhook secret are cleared, and the original callsign is freed for
+    re-registration. Historical faxes then show the sender/recipient as `deleted_<id>`."""
     with _lock:
         _c().execute(
             "UPDATE users SET username=?, display_name=?, pass_hash='', salt='', "
-            "token_hash=NULL, deleted_at=? WHERE id=?",
+            "token_hash=NULL, webhook_secret=NULL, deleted_at=? WHERE id=?",
             (f"deleted_{user_id}", "(deleted operator)", time.time(), user_id),
         )
         _c().commit()

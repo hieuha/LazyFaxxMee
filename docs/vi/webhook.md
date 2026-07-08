@@ -206,8 +206,9 @@ bản backup cho phù hợp.
 
 ### Quản trị (người vận hành server)
 
-- Xóa một user (tombstone trong trang admin) sẽ ẩn danh tài khoản và bỏ secret của nó, nên webhook
-  của user đó ngừng hoạt động.
+- Xóa một user (tombstone trong trang admin) sẽ ẩn danh tài khoản và xóa webhook secret (cùng
+  device token); tài khoản đã tombstone cũng bị loại khỏi lookup webhook, nên webhook của nó ngừng
+  hoạt động ngay lập tức.
 - Tài khoản gửi `webhook` là **tài khoản hệ thống dành riêng**: được tạo ở lần fax inbound đầu tiên,
   không đăng nhập được, và ẩn khỏi ô chọn callsign. Không ai đăng ký được callsign `webhook`.
 - Fax inbound xuất hiện trong inbox người nhận và trong danh sách fax của admin như mọi bản fax

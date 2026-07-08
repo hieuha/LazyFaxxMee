@@ -543,7 +543,17 @@ def test_tombstone_revokes_device_token():
             ws.receive_json()
 
 
-def test_tombstone_invalidates_existing_session():
+def test_tombstone_clears_webhook_secret():
+    from faxxme import app as A
+    key = _secret_for("whdel")                                   # register + mint a webhook secret
+    h = {"Authorization": f"Bearer {key}"}
+    assert client.post("/api/fax/inbound", data={"body": "pre"}, headers=h).status_code == 200
+    _admin_login()
+    uid = next(u for u in _admin_users() if u["username"] == "whdel")["id"]
+    client.post(f"/api/admin/users/{uid}/delete")
+    assert A.db.get_user(uid)["webhook_secret"] is None          # secret scrubbed from the row
+    assert client.post("/api/fax/inbound", data={"body": "post"},
+                       headers=h).status_code == 401             # webhook now rejects the old key
     import pytest
     from starlette.websockets import WebSocketDisconnect
     _reg("liveusr")
