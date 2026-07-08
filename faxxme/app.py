@@ -124,10 +124,21 @@ presence = Presence()
 # --------------------------------------------------------------------------- #
 #  Helpers                                                                      #
 # --------------------------------------------------------------------------- #
+def _user_from_session(cookie_value: str | None) -> dict | None:
+    """Resolve a session cookie to a live user, rejecting tombstoned accounts and any token whose
+    epoch is stale (i.e. issued before a logout bumped the user's session_epoch)."""
+    tok = auth.read_token(cookie_value)
+    if not tok:
+        return None
+    uid, epoch = tok
+    user = db.get_user(uid)
+    if not user or user.get("deleted_at") or (user.get("session_epoch") or 0) != epoch:
+        return None
+    return user
+
+
 def current_user(request: Request) -> dict | None:
-    uid = auth.read_token(request.cookies.get(auth.COOKIE_NAME))
-    user = db.get_user(uid) if uid else None
-    return user if user and not user.get("deleted_at") else None   # tombstoned -> logged out everywhere
+    return _user_from_session(request.cookies.get(auth.COOKIE_NAME))
 
 
 def require_user(request: Request) -> dict:
@@ -158,12 +169,19 @@ def _client_ua(conn) -> str | None:
 
 
 def render_escpos(fax: dict) -> bytes:
-    """Full ESC/POS for a fax: text header + body + optional dithered image raster."""
+    """Full ESC/POS for a fax: text header + body + optional dithered image raster.
+
+    For webhook faxes the stored body is `message + "\\n\\n" + attribution` (see
+    _compose_webhook_fax); we split off that trailing attribution and print it in a smaller
+    font so the reader's name/post/url reads as a footnote under the message."""
     sender = db.get_user(fax["sender_id"])
+    body, footer = fax["body"], ""
+    if sender["username"] == db.SYSTEM_WEBHOOK_USER and "\n\n" in fax["body"]:
+        body, footer = fax["body"].rsplit("\n\n", 1)   # footer never contains "\n\n"
     image_escpos = imaging.escpos_raster(fax["image"]) if fax.get("image") else None
     return printer.build_receipt(
-        sender["display_name"], sender["username"], fax["body"], fax["created_at"],
-        image_escpos=image_escpos,
+        sender["display_name"], sender["username"], body, fax["created_at"],
+        image_escpos=image_escpos, footer=footer,
     )
 
 
@@ -251,9 +269,9 @@ async def _printer_watch() -> None:
 # --------------------------------------------------------------------------- #
 #  Auth API                                                                     #
 # --------------------------------------------------------------------------- #
-def _set_session(resp: Response, user_id: int, secure: bool) -> None:
+def _set_session(resp: Response, user: dict, secure: bool) -> None:
     resp.set_cookie(
-        auth.COOKIE_NAME, auth.make_token(user_id),
+        auth.COOKIE_NAME, auth.make_token(user["id"], user.get("session_epoch") or 0),
         httponly=True, samesite="lax", secure=secure,   # Secure only over HTTPS
         max_age=60 * 60 * 24 * 30, path="/",
     )
@@ -280,7 +298,7 @@ async def register(request: Request, username: str = Form(...), password: str = 
     user = db.create_user(username, (display_name.strip() or username)[:32], ph, salt)
     db.touch_user(user["id"], _client_ip(request), _client_ua(request))
     resp = JSONResponse({"ok": True, "user": _public(user)})
-    _set_session(resp, user["id"], secure=request.url.scheme == "https")
+    _set_session(resp, user, secure=request.url.scheme == "https")
     return resp
 
 
@@ -291,12 +309,23 @@ async def login(request: Request, username: str = Form(...), password: str = For
         raise HTTPException(401, "bad callsign or password")
     db.touch_user(user["id"], _client_ip(request), _client_ua(request))
     resp = JSONResponse({"ok": True, "user": _public(user)})
-    _set_session(resp, user["id"], secure=request.url.scheme == "https")
+    _set_session(resp, user, secure=request.url.scheme == "https")
     return resp
 
 
 @app.post("/api/logout")
-async def logout():
+async def logout(request: Request):
+    """Invalidate the session server-side (bump session_epoch so the token is rejected from now on)
+    and drop any live browser tabs, then clear the cookie. Pi-agent sockets (device-token auth) are
+    left connected — logout is a session action, not a device revocation."""
+    user = current_user(request)
+    if user:
+        db.bump_session_epoch(user["id"])
+        for ws in presence.browser_sockets(user["id"]):
+            try:
+                await ws.close(code=4401)
+            except Exception:
+                pass
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(auth.COOKIE_NAME, path="/")
     return resp
@@ -644,9 +673,7 @@ def _ws_authenticate(ws: WebSocket) -> dict | None:
         u = db.get_user_by_token_hash(uname.strip().lower(), auth.hash_token(token))
         if u:
             return u
-    uid = auth.read_token(ws.cookies.get(auth.COOKIE_NAME))
-    user = db.get_user(uid) if uid else None
-    return user if user and not user.get("deleted_at") else None
+    return _user_from_session(ws.cookies.get(auth.COOKIE_NAME))   # session cookie (epoch-checked)
 
 
 async def _broadcast_node(user_id: int, online: bool) -> None:

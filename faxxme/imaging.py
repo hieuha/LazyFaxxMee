@@ -11,7 +11,11 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 DOTS = int(os.environ.get("FAXXME_PRINT_DOTS", "384"))     # printable dots across (58mm ≈ 384)
 MAX_H = int(os.environ.get("FAXXME_IMG_MAX_H", "1200"))    # cap print height (dots)
-MAX_UPLOAD = int(os.environ.get("FAXXME_MAX_UPLOAD", str(6 * 1024 * 1024)))  # 6 MB
+MAX_UPLOAD = int(os.environ.get("FAXXME_MAX_UPLOAD", str(6 * 1024 * 1024)))  # 6 MB (compressed)
+# A small (≤6 MB) file can still declare a huge canvas (decompression bomb) that would OOM a Pi
+# once decoded. Cap total pixels and reject by header dimensions BEFORE any decode/processing.
+MAX_PIXELS = int(os.environ.get("FAXXME_MAX_PIXELS", str(24_000_000)))  # ~24 MP
+Image.MAX_IMAGE_PIXELS = MAX_PIXELS   # also arm Pillow's own decompression-bomb guard
 
 # --- text-as-raster (for Unicode the printer's code page can't show: Vietnamese, emoji…) ---
 _BUNDLED_FONT = os.path.join(os.path.dirname(__file__), "fonts", "Play-Regular.ttf")
@@ -60,9 +64,10 @@ def _wrap_chars(text: str, cols: int) -> list[str]:
     return out
 
 
-def text_raster(text: str, dots: int = DOTS) -> bytes:
-    """Render text with a Unicode font and return a crisp (thresholded) `GS v 0` raster."""
-    font = ImageFont.truetype(FONT_PATH, FONT_SIZE)
+def text_raster(text: str, dots: int = DOTS, size: int | None = None) -> bytes:
+    """Render text with a Unicode font and return a crisp (thresholded) `GS v 0` raster.
+    `size` overrides the font size (e.g. a smaller attribution footer)."""
+    font = ImageFont.truetype(FONT_PATH, size or FONT_SIZE)
     char_w = max(1, int(font.getlength("M") or 1))
     cols = max(1, dots // char_w)
     lines: list[str] = []
@@ -83,7 +88,10 @@ def text_raster(text: str, dots: int = DOTS) -> bytes:
 def process_upload(raw: bytes, dots: int = DOTS, max_h: int = MAX_H) -> tuple[bytes, int, int]:
     """Decode any image, fix orientation, grayscale, auto-contrast, resize to paper width,
     and Floyd–Steinberg dither to 1-bit. Returns (png_bytes, width, height)."""
-    img = Image.open(io.BytesIO(raw))
+    img = Image.open(io.BytesIO(raw))           # lazy: reads header/dimensions, not the pixels yet
+    w0, h0 = img.size
+    if w0 * h0 > MAX_PIXELS:                     # reject bombs by declared size, before decoding
+        raise ValueError(f"image too large: {w0}x{h0} px exceeds the {MAX_PIXELS} px cap")
     img = ImageOps.exif_transpose(img)          # respect phone-photo rotation
     img = img.convert("L")                      # grayscale
     img = ImageOps.autocontrast(img, cutoff=1)  # stretch levels for a cleaner dither

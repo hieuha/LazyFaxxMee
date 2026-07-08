@@ -41,6 +41,19 @@ def test_register_login_me():
     assert r.status_code == 200
 
 
+def test_logout_invalidates_session_server_side():
+    """Logout bumps the user's session_epoch, so a captured cookie is rejected even if replayed."""
+    client.post("/api/logout")
+    _reg("logoutx")
+    stolen = client.cookies.get("fx_session")   # the raw signed session cookie
+    assert stolen and client.get("/api/me").status_code == 200
+    client.post("/api/logout")                  # invalidates it server-side
+    client.cookies.clear()
+    client.cookies.set("fx_session", stolen)     # replay the old cookie
+    assert client.get("/api/me").status_code == 401
+    client.cookies.clear()
+
+
 def test_register_validation():
     assert client.post("/api/register", data={"username": "x", "password": "pw123456"}).status_code == 400
     assert client.post("/api/register", data={"username": "okname", "password": "1"}).status_code == 400
@@ -673,11 +686,13 @@ def test_inbound_delivers_to_local_bridge_with_attribution():
     assert r.json()["delivered"] is True
     printed = open(_printfile, "rb").read()
     assert b"loved this post!" in printed      # ASCII message prints natively
+    assert b"\x1dv0" in printed                # attribution footer printed as a small raster
     assert b"@webhook" in printed              # sender header is the system 'webhook' account
-    # visible in bob's inbox, attributed to 'webhook'
+    # visible in bob's inbox, attributed to 'webhook'; the stored body carries name + post + url
     client.post("/api/login", data={"username": "bob", "password": "pw123456"})
     inbox = client.get("/api/inbox").json()["faxes"]
     assert inbox[0]["sender_name"] == "webhook"
+    assert "On Faxes" in inbox[0]["body"] and "Rita" in inbox[0]["body"]   # `post` + `name` shown
     client.post("/api/logout")
 
 
@@ -708,6 +723,39 @@ def test_webhook_sender_hidden_from_callsign_picker():
     names = [u["username"] for u in client.get("/api/users").json()["users"]]
     assert "webhook" not in names
     client.post("/api/logout")
+
+
+def test_escpos_injection_stripped_from_body():
+    """Control bytes in a fax body must not reach the printer as ESC/POS commands."""
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    if os.path.exists(_printfile):
+        os.remove(_printfile)
+    open(_printfile, "wb").close()
+    assert printer.local_available()
+    r = client.post("/api/fax", data={"to": "bob", "body": "hi\x1b@\x1dVevil there"})
+    assert r.status_code == 200, r.text
+    printed = open(_printfile, "rb").read()
+    assert b"hi@Vevil there" in printed      # text kept, control bytes removed
+    assert b"hi\x1b@" not in printed         # the raw ESC injection is gone
+    client.post("/api/logout")
+
+
+def test_oversized_image_rejected_before_processing():
+    """A huge-canvas image is rejected by declared dimensions, before any decode (bomb guard)."""
+    import io
+    import pytest
+    from PIL import Image
+    from faxxme import imaging
+    orig = imaging.MAX_PIXELS
+    imaging.MAX_PIXELS = 10_000               # tiny cap for the test
+    try:
+        buf = io.BytesIO()
+        Image.new("RGB", (300, 300)).save(buf, format="PNG")   # 90_000 px > cap
+        with pytest.raises(ValueError):
+            imaging.process_upload(buf.getvalue())
+    finally:
+        imaging.MAX_PIXELS = orig
 
 
 def test_inbound_rate_limit():

@@ -6,16 +6,28 @@ The local bridge lets the machine that physically hosts the printer (e.g. this R
 receive faxes without any browser open at all.
 """
 import os
+import re
 import time
 
 ESC = b"\x1b"
 GS = b"\x1d"
+
+# Any control byte (ESC 0x1b, GS 0x1d, …) inside message/header/footer TEXT would be written
+# straight to the printer and interpreted as an ESC/POS command. Strip them here — the single
+# choke point every print path (browser WebUSB, local bridge, Pi agent) renders through — so no
+# fax content can inject printer commands, whatever its source (sender, display name, webhook).
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _text(s: str) -> str:
+    return _CTRL_RE.sub("", s)
 
 # --- config for the optional local bridge ---
 LOCAL_DEVICE = os.environ.get("FAXXME_PRINTER_DEV", "/dev/usb/lp0")
 LOCAL_USER = os.environ.get("FAXXME_LOCAL_USER")  # username whose faxes print on this host
 LOCAL_WIDTH = int(os.environ.get("FAXXME_WIDTH", "32"))  # chars per line (58mm ~= 32)
 CUT_MODE = os.environ.get("FAXXME_CUT", "full").lower()  # full | partial | feed | none
+FOOTER_FONT_SIZE = int(os.environ.get("FAXXME_FOOTER_FONT_SIZE", "18"))  # small attribution raster
 
 
 def _wrap(text: str, width: int) -> list[str]:
@@ -43,17 +55,19 @@ def _wrap(text: str, width: int) -> list[str]:
     return out
 
 
-def _unicode_raster(text: str) -> bytes:
-    """A non-ASCII text line rendered via a Unicode font, left-aligned, as an ESC/POS raster."""
+def _unicode_raster(text: str, size: int | None = None) -> bytes:
+    """A non-ASCII text line rendered via a Unicode font, left-aligned, as an ESC/POS raster.
+    `size` overrides the font size (used by the small attribution footer)."""
     from . import imaging
-    return ESC + b"a" + b"\x00" + imaging.text_raster(text) + b"\n"
+    return ESC + b"a" + b"\x00" + imaging.text_raster(text, size=size) + b"\n"
 
 
 def build_receipt(sender_display: str, sender_username: str, body: str,
                   created_at: float, width: int = LOCAL_WIDTH,
-                  image_escpos: bytes | None = None) -> bytes:
+                  image_escpos: bytes | None = None, footer: str = "") -> bytes:
     """Render a fax as ESC/POS bytes. `image_escpos` is an optional pre-built raster
-    command (from imaging.escpos_raster) printed below the text."""
+    command (from imaging.escpos_raster) printed below the text. `footer` is an optional
+    attribution block (e.g. a webhook's sender name + source) printed in a smaller font."""
     ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(created_at))
     d = bytearray()
     d += ESC + b"@"                      # initialize
@@ -63,7 +77,7 @@ def build_receipt(sender_display: str, sender_username: str, body: str,
     d += ESC + b"!" + b"\x00"            # normal
     d += b"-" * width + b"\n"
     d += ESC + b"a" + b"\x00"            # left
-    from_line = f"FROM: {sender_display} @{sender_username}"
+    from_line = _text(f"FROM: {sender_display} @{sender_username}")   # strip control bytes
     if from_line.isascii():
         d += (from_line[:width] + "\n").encode("ascii", "replace")
     else:                                # a name with diacritics -> render as raster
@@ -72,6 +86,7 @@ def build_receipt(sender_display: str, sender_username: str, body: str,
     d += b"-" * width + b"\n"
     if body:
         for para in body.replace("\r\n", "\n").split("\n"):
+            para = _text(para)           # neutralize any embedded ESC/POS control bytes
             if para == "":
                 d += b"\n"
             elif para.isascii():         # fast, crisp native ESC/POS text
@@ -86,6 +101,11 @@ def build_receipt(sender_display: str, sender_username: str, body: str,
         d += image_escpos
         d += b"\n"
         d += ESC + b"a" + b"\x00"
+    if footer.strip():                   # attribution block, one small raster so every line
+        d += b"\n"                        # (name, post, url) looks identical and smaller than
+        # keep the line breaks (raster splits on them), strip other control bytes
+        clean_footer = "\n".join(_text(ln) for ln in footer.strip("\n").split("\n"))
+        d += _unicode_raster(clean_footer, size=FOOTER_FONT_SIZE)          # the message
     d += b"-" * width + b"\n"
     d += ESC + b"a" + b"\x01"            # center
     d += b".: end of message :.\n"

@@ -43,8 +43,10 @@ def verify_password(password: str, pass_hash: str, salt: str) -> bool:
 
 # ---- signed session tokens ----
 
-def make_token(user_id: int) -> str:
-    payload = str(user_id).encode()
+def make_token(user_id: int, epoch: int = 0) -> str:
+    """Signed session cookie payload = `user_id.epoch`. The epoch is the user's current
+    `session_epoch`; bumping it server-side (on logout) invalidates every token issued before."""
+    payload = f"{user_id}.{epoch}".encode()
     sig = hmac.new(_SECRET, payload, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=") + "." + \
         base64.urlsafe_b64encode(sig).decode().rstrip("=")
@@ -89,7 +91,9 @@ def valid_admin_session(value: str | None) -> bool:
     return bool(value) and hmac.compare_digest(value, make_admin_session())
 
 
-def read_token(token: str | None) -> int | None:
+def read_token(token: str | None) -> tuple[int, int] | None:
+    """Verify a session cookie and return `(user_id, epoch)`, or None if forged/malformed.
+    Legacy tokens that carry only a user_id (no epoch) are read as epoch 0."""
     if not token or "." not in token:
         return None
     try:
@@ -102,6 +106,7 @@ def read_token(token: str | None) -> int | None:
     if not hmac.compare_digest(sig, expected):
         return None
     try:
-        return int(payload.decode())
+        uid_str, _, epoch_str = payload.decode().partition(".")
+        return int(uid_str), (int(epoch_str) if epoch_str else 0)
     except ValueError:
         return None

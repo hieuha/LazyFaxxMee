@@ -212,8 +212,9 @@ bản backup cho phù hợp.
 
 ## Bản fax in ra trông thế nào
 
-Header người gửi luôn là tài khoản hệ thống — `FROM: Webhook @webhook` — còn phần thân mang thông
-tin ghi nguồn thật mà bạn gửi lên:
+Header người gửi luôn là tài khoản hệ thống — `FROM: Webhook @webhook` — message in cỡ thường, còn
+khối ghi nguồn (`name`, `post`, `url`) in **chữ nhỏ hơn** ở dưới (cỡ theo `FAXXME_FOOTER_FONT_SIZE`,
+mặc định 18):
 
 ```
         FAXXME

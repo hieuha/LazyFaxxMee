@@ -107,6 +107,7 @@ All configuration is via environment variables:
 | `FAXXME_FONT` | bundled Play (Google Fonts) | TTF used to render non-ASCII text (Vietnamese, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | font size for rendered Unicode text |
 | `FAXXME_FONT_THRESHOLD` | `176` | black/white cutoff for rendered text (higher = darker) |
+| `FAXXME_FOOTER_FONT_SIZE` | `18` | font size for the small webhook attribution footer (name/post/url) |
 | `FAXXME_DB` / `FAXXME_SECRET` | in repo | sqlite + session-secret paths |
 
 ## API

@@ -212,8 +212,9 @@ so the stakes are low; still, protect DB access and backups accordingly.
 
 ## How the printed fax looks
 
-The sender header is always the system account — `FROM: Webhook @webhook` — and the message body
-carries the real attribution you sent:
+The sender header is always the system account — `FROM: Webhook @webhook` — the message prints at
+normal size, and the attribution block (`name`, `post`, `url`) prints in a **smaller font**
+underneath (size via `FAXXME_FOOTER_FONT_SIZE`, default 18):
 
 ```
         FAXXME

@@ -83,6 +83,9 @@ def init() -> None:
             _conn.execute("ALTER TABLE users ADD COLUMN last_ua TEXT")
         if "last_seen" not in have_u:
             _conn.execute("ALTER TABLE users ADD COLUMN last_seen REAL")
+        # bumped on logout to invalidate every session token issued for this user server-side
+        if "session_epoch" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 0")
         # normalize any legacy non-lowercase usernames (idempotent; skip if it would collide)
         for uid, uname in _conn.execute(
                 "SELECT id, username FROM users WHERE username <> lower(username)").fetchall():
@@ -131,6 +134,13 @@ def get_user_by_name(username: str) -> dict | None:
 def set_user_token(user_id: int, token_hash: str) -> None:
     with _lock:
         _c().execute("UPDATE users SET token_hash=? WHERE id=?", (token_hash, user_id))
+        _c().commit()
+
+
+def bump_session_epoch(user_id: int) -> None:
+    """Invalidate all of a user's outstanding session cookies (called on logout)."""
+    with _lock:
+        _c().execute("UPDATE users SET session_epoch = session_epoch + 1 WHERE id=?", (user_id,))
         _c().commit()
 
 
