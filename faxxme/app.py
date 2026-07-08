@@ -652,4 +652,9 @@ async def admin_page():
     return _serve_page("admin.html")
 
 
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse(os.path.join(STATIC_DIR, "favicon.ico"), media_type="image/x-icon")
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
