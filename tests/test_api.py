@@ -735,6 +735,29 @@ def test_webhook_sender_hidden_from_callsign_picker():
     client.post("/api/logout")
 
 
+def test_write_all_survives_short_writes():
+    """A big payload to a pipe forces short os.write counts; _write_all must still deliver it all."""
+    import threading
+    data = b"RASTER" * 100_000            # ~600 KB, well past a pipe buffer -> short writes
+    r, w = os.pipe()
+    got = bytearray()
+
+    def reader():
+        while True:
+            chunk = os.read(r, 65536)
+            if not chunk:
+                break
+            got.extend(chunk)
+
+    t = threading.Thread(target=reader)
+    t.start()
+    ok = printer._write_all(w, data)
+    os.close(w)
+    t.join()
+    os.close(r)
+    assert ok and bytes(got) == data      # every byte arrived, in order
+
+
 def test_escpos_injection_stripped_from_body():
     """Control bytes in a fax body must not reach the printer as ESC/POS commands."""
     client.post("/api/logout")

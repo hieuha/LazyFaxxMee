@@ -134,14 +134,29 @@ def local_available() -> bool:
     return LOCAL_USER is not None and os.access(LOCAL_DEVICE, os.W_OK)
 
 
+def _write_all(fd: int, data: bytes, chunk: int = 4096) -> bool:
+    """Write every byte, tolerating short writes. A single os.write to a USB printer char device
+    often accepts only part of a large buffer and returns a short count; without looping the rest
+    is silently dropped — long messages/images then print truncated. Chunking also lets the
+    (blocking) device apply backpressure so we don't overrun the printer's small buffer."""
+    view = memoryview(data)
+    total = len(view)
+    sent = 0
+    while sent < total:
+        w = os.write(fd, view[sent:sent + chunk])
+        if w <= 0:
+            return False
+        sent += w
+    return True
+
+
 def print_local(data: bytes) -> bool:
     """Write raw ESC/POS bytes straight to the local printer device."""
     try:
         fd = os.open(LOCAL_DEVICE, os.O_WRONLY)
         try:
-            os.write(fd, data)
+            return _write_all(fd, data)
         finally:
             os.close(fd)
-        return True
     except OSError:
         return False

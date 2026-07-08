@@ -49,10 +49,19 @@ def device_writable() -> bool:
 
 
 def write_device(data: bytes) -> bool:
+    # Loop until every byte is written: a single os.write to a USB printer often accepts only part
+    # of a large buffer (returns a short count), so long messages/images would otherwise print
+    # truncated. Chunking also lets the blocking device throttle us to the printer's buffer.
     try:
         fd = os.open(DEVICE, os.O_WRONLY)
         try:
-            os.write(fd, data)
+            view = memoryview(data)
+            total, sent = len(view), 0
+            while sent < total:
+                w = os.write(fd, view[sent:sent + 4096])
+                if w <= 0:
+                    return False
+                sent += w
         finally:
             os.close(fd)
         return True
