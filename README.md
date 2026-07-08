@@ -69,6 +69,7 @@ Deep-dive docs live in [`docs/`](docs/):
 - [How it works](docs/how-it-works.md) — architecture, delivery model, watcher, imaging, tokens, admin.
 - [Printer compatibility](docs/printers.md) — supported thermal printers, widths, auto-cut.
 - [Platform notes](docs/platforms.md) — WebUSB gotchas on Ubuntu / macOS / Windows.
+- [Webhook integration](docs/webhook.md) — let any site fax you (blog comments, apps): inbound API, samples, security, secret-key management.
 - [Printer node / agent](agent/README.md) — run FaxxMe on your own Pi (device token, no browser).
 
 ## Run
@@ -100,6 +101,8 @@ All configuration is via environment variables:
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | per-sender rate limit: max faxes per N seconds (0 = off) |
+| `FAXXME_WEBHOOK_RATE_MAX` / `FAXXME_WEBHOOK_RATE_WINDOW` | `5` / `300` | inbound webhook rate limit, enforced per author **and** per calling-site IP (0 = off) |
+| `FAXXME_WEBHOOK_MSG_MAX` | `500` | max characters in an inbound webhook message |
 | `FAXXME_ADMIN_PASSWORD_HASH` | *(unset)* | sha256 hash of the `/admin` password; unset = admin disabled |
 | `FAXXME_FONT` | bundled Play (Google Fonts) | TTF used to render non-ASCII text (Vietnamese, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | font size for rendered Unicode text |
@@ -111,19 +114,92 @@ All configuration is via environment variables:
 | method | path | purpose |
 |--------|------|---------|
 | POST | `/api/register` · `/api/login` · `/api/logout` | auth (form fields) |
-| GET | `/api/me` | current user + `printer_online`, `local_bridge`, `node_online`, `has_token` |
+| GET | `/api/me` | current user + `printer_online`, `local_bridge`, `node_online`, `has_token`, `webhook_secret` |
 | GET | `/api/users` | other operators + online flags |
 | POST | `/api/fax` | send (multipart: `to`, `body`, optional `image`) |
 | GET | `/api/inbox` · `/api/outbox` | fax history (newest 50) |
 | POST | `/api/inbox/clear` · `/api/outbox/clear` | clear your side |
 | GET | `/api/fax/{id}/image` | the dithered PNG (sender/recipient only) |
 | POST | `/api/token/regenerate` | issue a device token (shown once); revokes + kicks the old one |
+| POST | `/api/webhook/regenerate` · `/api/webhook/revoke` | mint / revoke a **webhook secret key** (re-viewable in the panel) — see [Webhook integration](#webhook-integration) |
+| POST | `/api/fax/inbound` | **public webhook** — any site posts a message that prints as a fax (auth via secret key, not a session) |
 | POST | `/api/test-print` | print a test page on your node/bridge |
 | POST | `/api/admin/login` · `/api/admin/logout` | admin session (password → signed cookie; separate from user auth) |
 | GET | `/admin` · `/api/admin/*` | admin panel: paginated users + faxes, delete, revoke tokens, stats (admin cookie only) |
 | WS | `/ws` | presence + live delivery + status/node pushes; auth via **session cookie** (browser) or **`Authorization: Bearer <token>` + `X-Faxxme-User`** (agent) |
 | GET | `/healthz` | `{status, printer_bridge}` |
 | GET | `/` | the single-page CRT console |
+
+## Webhook integration
+
+Let any external site fax **you** — for example straight from a blog's comment box (e.g. [lazyblog](https://github.com/hieuha/lazyblog)). The end sender doesn't need a FaxxMe account — the site authenticates on their behalf with your **secret key**. It's a plain webhook: anyone holding the secret can POST a message that prints on your printer.
+
+> 📖 **Full guide:** [docs/webhook.md](docs/webhook.md) — sample requests (PHP/Python/Node), security, secret-key management, administration, and troubleshooting.
+
+**How it fits together**
+
+```mermaid
+flowchart LR
+    R["visitor<br/>comment box"] -->|"POST (same-origin)"| B["your site server<br/>(e.g. blog plugin)"]
+    B -->|"POST /api/fax/inbound<br/>Authorization: Bearer fxwh_…"| F(["FAXXME server"])
+    F --> P["your printer"]
+```
+
+The site calls FaxxMe **server-side**, not from the visitor's browser. That keeps the secret key hidden, needs no CORS, and lets the site add its own per-visitor checks (captcha, its own rate limit) before forwarding.
+
+**Set up (author):** log in → `:: WEBHOOK INTEGRATION → GENERATE SECRET KEY`. The key (`fxwh_…`) shows masked — click the **eye** to reveal, **copy** to copy (it stays viewable in the panel). Hand it to whoever runs the site, to store **server-side** (e.g. in the site's `.env`). The `↻` icon rotates it (old key dies instantly); `revoke` turns the webhook off entirely.
+
+**Scope & safety:** a secret key can *only* deliver a fax to the author who owns it — there's no recipient field to target anyone else. Inbound faxes are rate-limited per author **and** per calling-site IP (derived server-side, not spoofable; `FAXXME_WEBHOOK_RATE_MAX`/`FAXXME_WEBHOOK_RATE_WINDOW`), messages are capped at `FAXXME_WEBHOOK_MSG_MAX`, and they print immediately (fire-and-forget) attributed to the reserved `@webhook` sender. Being spammed? Revoke the key.
+
+**`POST /api/fax/inbound`** — `Content-Type: application/x-www-form-urlencoded`, header `Authorization: Bearer <secret key>`:
+
+| field | required | notes |
+|-------|----------|-------|
+| `body` | ✅ | the message (≤ `FAXXME_WEBHOOK_MSG_MAX` chars) |
+| `name` | – | sender's name (≤ 40) — printed as attribution |
+| `post` | – | source title, e.g. a post title (≤ 120) |
+| `url` | – | source URL (≤ 200) |
+
+FaxxMe derives the client IP itself for per-IP rate limiting (no spoofable IP field); that IP is your calling server, so add your own per-visitor throttle. Full details in [docs/webhook.md](docs/webhook.md).
+
+Returns `{ "ok": true, "fax_id": …, "delivered": bool }`. Errors: `401` (missing/invalid secret), `400` (empty/too-long message), `429` (rate-limited).
+
+**Caller side (PHP snippet, e.g. for a blog plugin):**
+
+```php
+<?php
+// Forward a comment to FaxxMe as a fax. Runs server-side; the secret never reaches the browser.
+$faxxme = 'https://fax.hatrunghieu.com';
+$secret = getenv('FAXXME_SECRET_KEY');   // fxwh_… , kept out of version control
+
+$ch = curl_init("$faxxme/api/fax/inbound");
+curl_setopt_array($ch, [
+    CURLOPT_POST           => true,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER     => ["Authorization: Bearer $secret"],
+    CURLOPT_POSTFIELDS     => http_build_query([
+        'body'      => $_POST['message'] ?? '',
+        'name'      => $_POST['name'] ?? '',
+        'post'      => $postTitle,
+        'url'       => $postUrl,
+    ]),
+    CURLOPT_TIMEOUT        => 10,
+]);
+$res  = curl_exec($ch);
+$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);   // 200 ok · 429 too fast · 401 bad secret
+curl_close($ch);
+```
+
+Curl equivalent for a quick test:
+
+```bash
+curl -X POST https://fax.hatrunghieu.com/api/fax/inbound \
+  -H "Authorization: Bearer fxwh_XXXX" \
+  --data-urlencode "body=great post!" \
+  --data-urlencode "name=A reader" \
+  --data-urlencode "post=My First Fax" \
+  --data-urlencode "url=https://blog.example/first"
+```
 
 ## ⚠️ WebUSB needs a secure context
 

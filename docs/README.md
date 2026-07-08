@@ -8,6 +8,8 @@
   work well, paper-width and auto-cut config, and caveats.
 - **[Platform notes](platforms.md)** — what to watch out for with WebUSB on
   Ubuntu/Linux, macOS, and Windows.
+- **[Webhook integration](webhook.md)** — let any site fax you (e.g. a blog's comments):
+  the inbound API, sample requests, security, secret-key management, and integration.
 - **[Printer node / agent](../agent/README.md)** — run FaxxMe on your own Raspberry Pi so
   faxes to you print there, authenticated with a device token (no browser needed).
 

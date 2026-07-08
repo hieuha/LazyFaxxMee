@@ -70,6 +70,7 @@ Tài liệu chuyên sâu nằm trong [`docs/vi/`](docs/vi/):
 - [Cơ chế hoạt động](docs/vi/how-it-works.md) — kiến trúc, mô hình giao fax, tiến trình canh chừng, xử lý ảnh, token, admin.
 - [Tương thích máy in](docs/vi/printers.md) — các máy in nhiệt được hỗ trợ, khổ giấy, kiểu cắt.
 - [Ghi chú theo nền tảng](docs/vi/platforms.md) — những điểm cần lưu ý của WebUSB trên Ubuntu / macOS / Windows.
+- [Tích hợp webhook](docs/vi/webhook.md) — cho phép bất kỳ site nào fax cho bạn (comment blog, app…): API inbound, ví dụ, bảo mật, quản lý secret key.
 - [Node in / agent](agent/README-vi.md) — chạy FaxxMe trên chiếc Pi của bạn (device token, không cần trình duyệt).
 
 ## Chạy
@@ -101,6 +102,8 @@ Mọi cấu hình đều thông qua biến môi trường:
 | `FAXXME_IMG_MAX_H` | `1200` | chiều cao ảnh in tối đa (dot) |
 | `FAXXME_MAX_UPLOAD` | `6291456` | dung lượng ảnh tải lên tối đa (byte, 6 MB) |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | giới hạn tần suất theo người gửi: tối đa N bản fax mỗi N giây (0 = tắt) |
+| `FAXXME_WEBHOOK_RATE_MAX` / `FAXXME_WEBHOOK_RATE_WINDOW` | `5` / `300` | giới hạn fax gửi qua webhook, áp theo tác giả **và** theo IP site gọi (0 = tắt) |
+| `FAXXME_WEBHOOK_MSG_MAX` | `500` | số ký tự tối đa trong tin nhắn gửi qua webhook |
 | `FAXXME_ADMIN_PASSWORD_HASH` | *(không đặt)* | hash sha256 của mật khẩu trang `/admin`; không đặt = tắt admin |
 | `FAXXME_FONT` | Play đóng kèm (Google Fonts) | TTF dùng để dựng chữ non-ASCII (tiếng Việt, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | cỡ font khi dựng chữ Unicode |
@@ -112,19 +115,92 @@ Mọi cấu hình đều thông qua biến môi trường:
 | method | path | mục đích |
 |--------|------|---------|
 | POST | `/api/register` · `/api/login` · `/api/logout` | xác thực (trường form) |
-| GET | `/api/me` | người dùng hiện tại + `printer_online`, `local_bridge`, `node_online`, `has_token` |
+| GET | `/api/me` | người dùng hiện tại + `printer_online`, `local_bridge`, `node_online`, `has_token`, `webhook_secret` |
 | GET | `/api/users` | các operator khác + cờ online |
 | POST | `/api/fax` | gửi (multipart: `to`, `body`, `image` tùy chọn) |
 | GET | `/api/inbox` · `/api/outbox` | lịch sử fax (50 bản mới nhất) |
 | POST | `/api/inbox/clear` · `/api/outbox/clear` | dọn phía của bạn |
 | GET | `/api/fax/{id}/image` | ảnh PNG đã dither (chỉ người gửi/người nhận) |
 | POST | `/api/token/regenerate` | cấp một device token (chỉ hiện một lần); thu hồi + ngắt token cũ |
+| POST | `/api/webhook/regenerate` · `/api/webhook/revoke` | tạo / thu hồi **secret key cho webhook** (xem lại được trong khối) — xem [Tích hợp webhook](#tích-hợp-webhook) |
+| POST | `/api/fax/inbound` | **webhook công khai** — bất kỳ site nào cũng POST một tin nhắn để in thành fax (xác thực bằng secret key, không phải phiên) |
 | POST | `/api/test-print` | in trang thử trên node/bridge của bạn |
 | POST | `/api/admin/login` · `/api/admin/logout` | phiên admin (mật khẩu → cookie ký; tách khỏi auth người dùng) |
 | GET | `/admin` · `/api/admin/*` | trang quản trị: người dùng + fax (phân trang), xóa, thu hồi token, thống kê (chỉ cookie admin) |
 | WS | `/ws` | presence + giao trực tiếp + đẩy trạng thái/node; xác thực bằng **cookie phiên** (trình duyệt) hoặc **`Authorization: Bearer <token>` + `X-Faxxme-User`** (agent) |
 | GET | `/healthz` | `{status, printer_bridge}` |
 | GET | `/` | trang console CRT đơn (SPA) |
+
+## Tích hợp webhook
+
+Cho phép bất kỳ site bên ngoài nào fax **cho bạn** — ví dụ ngay từ ô comment của một blog (như [lazyblog](https://github.com/hieuha/lazyblog)). Người gửi **không cần** tài khoản FaxxMe — site xác thực thay họ bằng **secret key** của bạn. Đây là một webhook thuần: ai giữ secret cũng có thể POST một tin nhắn để in ra máy in của bạn.
+
+> 📖 **Hướng dẫn đầy đủ:** [docs/vi/webhook.md](docs/vi/webhook.md) — ví dụ request (PHP/Python/Node), bảo mật, quản lý secret key, quản trị, và khắc phục sự cố.
+
+**Cách các mảnh ghép với nhau**
+
+```mermaid
+flowchart LR
+    R["người xem<br/>ô comment"] -->|"POST (cùng-origin)"| B["server site của bạn<br/>(vd. plugin blog)"]
+    B -->|"POST /api/fax/inbound<br/>Authorization: Bearer fxwh_…"| F(["server FAXXME"])
+    F --> P["máy in của bạn"]
+```
+
+Site gọi FaxxMe **phía server**, không phải từ trình duyệt người xem. Nhờ vậy secret key luôn bí mật, khỏi cần CORS, và site có thể tự thêm kiểm tra riêng cho từng người (captcha, rate-limit của site) trước khi chuyển tiếp.
+
+**Thiết lập (tác giả):** đăng nhập → `:: WEBHOOK INTEGRATION → GENERATE SECRET KEY`. Key (`fxwh_…`) hiện dạng che — bấm **con mắt** để hiện, **copy** để sao chép (secret vẫn xem lại được trong khối). Đưa cho người quản trị site để lưu **phía server** (ví dụ trong `.env` của site). Nút `↻` xoay key (key cũ chết ngay); `revoke` tắt hẳn webhook.
+
+**Phạm vi & an toàn:** một secret key **chỉ** gửi fax được cho đúng tác giả sở hữu nó — không có trường người nhận để nhắm tới ai khác. Fax inbound bị giới hạn tần suất theo tác giả **và** theo IP site gọi (suy ra phía server, không spoof được; `FAXXME_WEBHOOK_RATE_MAX`/`FAXXME_WEBHOOK_RATE_WINDOW`), tin nhắn giới hạn `FAXXME_WEBHOOK_MSG_MAX` ký tự, và in ngay (fire-and-forget) với người gửi là tài khoản dành riêng `@webhook`. Bị spam? Cứ revoke key.
+
+**`POST /api/fax/inbound`** — `Content-Type: application/x-www-form-urlencoded`, header `Authorization: Bearer <secret key>`:
+
+| trường | bắt buộc | ghi chú |
+|--------|----------|---------|
+| `body` | ✅ | tin nhắn (≤ `FAXXME_WEBHOOK_MSG_MAX` ký tự) |
+| `name` | – | tên người gửi (≤ 40) — in kèm để ghi nguồn |
+| `post` | – | tiêu đề nguồn, ví dụ tên bài viết (≤ 120) |
+| `url` | – | URL nguồn (≤ 200) |
+
+FaxxMe tự suy ra IP client để rate-limit theo IP (không có trường IP để spoof); IP đó là server site gọi của bạn, nên hãy tự thêm throttle theo từng người xem. Chi tiết trong [docs/vi/webhook.md](docs/vi/webhook.md).
+
+Trả về `{ "ok": true, "fax_id": …, "delivered": bool }`. Lỗi: `401` (thiếu/sai secret), `400` (rỗng/quá dài), `429` (bị giới hạn).
+
+**Phía site gọi (đoạn PHP, ví dụ cho plugin blog):**
+
+```php
+<?php
+// Chuyển tiếp một comment thành fax tới FaxxMe. Chạy phía server; secret không bao giờ ra trình duyệt.
+$faxxme = 'https://fax.hatrunghieu.com';
+$secret = getenv('FAXXME_SECRET_KEY');   // fxwh_… , giữ ngoài version control
+
+$ch = curl_init("$faxxme/api/fax/inbound");
+curl_setopt_array($ch, [
+    CURLOPT_POST           => true,
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_HTTPHEADER     => ["Authorization: Bearer $secret"],
+    CURLOPT_POSTFIELDS     => http_build_query([
+        'body'      => $_POST['message'] ?? '',
+        'name'      => $_POST['name'] ?? '',
+        'post'      => $postTitle,
+        'url'       => $postUrl,
+    ]),
+    CURLOPT_TIMEOUT        => 10,
+]);
+$res  = curl_exec($ch);
+$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);   // 200 ok · 429 quá nhanh · 401 sai secret
+curl_close($ch);
+```
+
+Tương đương bằng curl để thử nhanh:
+
+```bash
+curl -X POST https://fax.hatrunghieu.com/api/fax/inbound \
+  -H "Authorization: Bearer fxwh_XXXX" \
+  --data-urlencode "body=bài viết hay quá!" \
+  --data-urlencode "name=Một độc giả" \
+  --data-urlencode "post=Bài fax đầu tiên" \
+  --data-urlencode "url=https://blog.example/first"
+```
 
 ## ⚠️ WebUSB cần một secure context
 

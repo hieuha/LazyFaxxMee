@@ -8,6 +8,8 @@
   giấy và tự cắt, cùng các lưu ý.
 - **[Ghi chú theo nền tảng](platforms.md)** — những điều cần để ý với WebUSB trên Ubuntu/Linux, macOS,
   và Windows.
+- **[Tích hợp webhook](webhook.md)** — cho phép bất kỳ site nào fax cho bạn (ví dụ ô comment blog):
+  API inbound, ví dụ request, bảo mật, quản lý secret key, và cách tích hợp.
 - **[Node in / agent](../../agent/README-vi.md)** — chạy FaxxMe trên chiếc Raspberry Pi của bạn để fax
   gửi tới bạn được in ngay tại đó, xác thực bằng device token (không cần trình duyệt).
 
