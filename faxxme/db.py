@@ -1,8 +1,14 @@
 """SQLite persistence for FaxxMe. Stdlib-only, thread-safe via a single guarded connection."""
 import os
+import secrets
 import sqlite3
 import threading
 import time
+
+# Reserved callsign used as the sender for inbound webhook faxes (the end sender has no account,
+# but a fax still needs a real sender_id). Hidden from the callsign picker; nobody can register
+# or log in as it.
+SYSTEM_WEBHOOK_USER = "webhook"
 
 _DB_PATH = os.environ.get("FAXXME_DB", os.path.join(os.path.dirname(__file__), "..", "faxxme.db"))
 _lock = threading.RLock()
@@ -63,6 +69,12 @@ def init() -> None:
         have_u = {r[1] for r in _conn.execute("PRAGMA table_info(users)").fetchall()}
         if "token_hash" not in have_u:
             _conn.execute("ALTER TABLE users ADD COLUMN token_hash TEXT")
+        if "webhook_secret_hash" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN webhook_secret_hash TEXT")
+        # webhook secret is stored in plaintext (not hashed) so the owner can re-view it in the
+        # UI at any time; it only ever lets someone spam-print to its owner, and is revocable.
+        if "webhook_secret" not in have_u:
+            _conn.execute("ALTER TABLE users ADD COLUMN webhook_secret TEXT")
         if "deleted_at" not in have_u:
             _conn.execute("ALTER TABLE users ADD COLUMN deleted_at REAL")
         if "last_ip" not in have_u:
@@ -146,10 +158,55 @@ def get_user_by_token_hash(username: str, token_hash: str) -> dict | None:
         return dict(row) if hmac.compare_digest(row["token_hash"], token_hash) else None
 
 
+# ---- webhook secrets (per-author, scoped to deliver only to that author) ----
+# Stored in plaintext (column `webhook_secret`) so the owner can re-view it in the UI anytime.
+
+def set_user_webhook_secret(user_id: int, secret: str) -> None:
+    with _lock:
+        _c().execute("UPDATE users SET webhook_secret=? WHERE id=?", (secret, user_id))
+        _c().commit()
+
+
+def clear_user_webhook_secret(user_id: int) -> None:
+    with _lock:
+        _c().execute("UPDATE users SET webhook_secret=NULL WHERE id=?", (user_id,))
+        _c().commit()
+
+
+def get_user_by_webhook_secret(secret: str) -> dict | None:
+    """Resolve a webhook secret to its owning author. The caller only holds the secret (no
+    callsign), so we look up by the secret value; None for unknown secrets or tombstoned accounts."""
+    if not secret:
+        return None
+    with _lock:
+        row = _c().execute(
+            "SELECT * FROM users WHERE webhook_secret=? AND deleted_at IS NULL", (secret,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def system_webhook_sender() -> dict:
+    """The reserved 'webhook' user used as sender_id for inbound webhook faxes. Created lazily with
+    an unusable password so it can never be logged into; hidden from the callsign picker."""
+    with _lock:
+        row = _c().execute("SELECT * FROM users WHERE username=?", (SYSTEM_WEBHOOK_USER,)).fetchone()
+        if row:
+            return dict(row)
+        # random junk hash/salt -> no password will ever verify against it
+        cur = _c().execute(
+            "INSERT INTO users(username, display_name, pass_hash, salt, created_at) VALUES (?,?,?,?,?)",
+            (SYSTEM_WEBHOOK_USER, "Webhook", secrets.token_hex(32), secrets.token_hex(16), time.time()),
+        )
+        _c().commit()
+        return get_user(cur.lastrowid)
+
+
 def list_users() -> list[dict]:
     with _lock:
         rows = _c().execute(
-            "SELECT id, username, display_name FROM users WHERE deleted_at IS NULL ORDER BY username"
+            "SELECT id, username, display_name FROM users "
+            "WHERE deleted_at IS NULL AND username <> ? ORDER BY username",
+            (SYSTEM_WEBHOOK_USER,),
         ).fetchall()
         return [dict(r) for r in rows]
 

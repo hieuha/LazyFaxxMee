@@ -21,6 +21,13 @@ FAX_RATE_MAX = int(os.environ.get("FAXXME_FAX_RATE_MAX", "20"))         # max fa
 FAX_RATE_WINDOW = float(os.environ.get("FAXXME_FAX_RATE_WINDOW", "60"))  # window, seconds
 _fax_hits: dict[int, list[float]] = {}
 
+# inbound webhook fax rate limit — the public path anyone with a secret can reach, so it's
+# tighter. Enforced independently per author (webhook secret) AND per end-sender IP forwarded in.
+WEBHOOK_RATE_MAX = int(os.environ.get("FAXXME_WEBHOOK_RATE_MAX", "5"))          # max inbound per window (0 = off)
+WEBHOOK_RATE_WINDOW = float(os.environ.get("FAXXME_WEBHOOK_RATE_WINDOW", "300"))  # window, seconds
+WEBHOOK_MSG_MAX = int(os.environ.get("FAXXME_WEBHOOK_MSG_MAX", "500"))          # max chars in a reader message
+_webhook_hits: dict[str, list[float]] = {}
+
 # /admin panel is gated by a single hashed password in the env — fully separate from user
 # accounts. Set FAXXME_ADMIN_PASSWORD_HASH to sha256(password).hexdigest(); unset = disabled.
 ADMIN_PASSWORD_HASH = os.environ.get("FAXXME_ADMIN_PASSWORD_HASH", "").strip().lower()
@@ -30,17 +37,22 @@ def admin_enabled() -> bool:
     return bool(ADMIN_PASSWORD_HASH)
 
 
-def _rate_ok(user_id: int) -> bool:
-    """Sliding-window rate check per sender; records a hit when allowed."""
-    if FAX_RATE_MAX <= 0:
+def _window_ok(store: dict, key, limit: int, window: float) -> bool:
+    """Generic sliding-window rate check; records a hit when allowed. limit<=0 disables."""
+    if limit <= 0:
         return True
     now = time.monotonic()
-    hits = [t for t in _fax_hits.get(user_id, ()) if now - t < FAX_RATE_WINDOW]
-    ok = len(hits) < FAX_RATE_MAX
+    hits = [t for t in store.get(key, ()) if now - t < window]
+    ok = len(hits) < limit
     if ok:
         hits.append(now)
-    _fax_hits[user_id] = hits
+    store[key] = hits
     return ok
+
+
+def _rate_ok(user_id: int) -> bool:
+    """Sliding-window rate check per sender; records a hit when allowed."""
+    return _window_ok(_fax_hits, user_id, FAX_RATE_MAX, FAX_RATE_WINDOW)
 
 
 @asynccontextmanager
@@ -258,6 +270,8 @@ async def register(request: Request, username: str = Form(...), password: str = 
         raise HTTPException(400, "username must be 2-24 chars: a-z, 0-9, underscore")
     if username.startswith("deleted_"):    # reserved for tombstoned accounts
         raise HTTPException(400, "that callsign prefix is reserved")
+    if username == db.SYSTEM_WEBHOOK_USER:     # reserved for the webhook-inbound system sender
+        raise HTTPException(400, "that callsign is reserved")
     if len(password) < 8:
         raise HTTPException(400, "password too short (min 8)")
     if db.get_user_by_name(username):
@@ -301,6 +315,8 @@ async def me(request: Request):
         "local_bridge": user["username"] == printer.LOCAL_USER and printer.local_available(),
         "node_online": presence.node_online(user["id"]),
         "has_token": bool(user.get("token_hash")),
+        # the owner's own webhook secret, so the UI can show it (masked, with a reveal toggle)
+        "webhook_secret": user.get("webhook_secret"),
     }
 
 
@@ -318,6 +334,25 @@ async def regenerate_token(request: Request):
         except Exception:
             pass
     return {"ok": True, "username": user["username"], "token": token}
+
+
+@app.post("/api/webhook/regenerate")
+async def regenerate_webhook_secret(request: Request):
+    """Issue a fresh webhook secret key (viewable later via /api/me). Any site or service can hold it
+    and POST reader messages as faxes — see POST /api/fax/inbound. Regenerating immediately
+    revokes the previous secret, breaking anything still using it until it's updated."""
+    user = require_user(request)
+    secret = auth.new_webhook_secret()
+    db.set_user_webhook_secret(user["id"], secret)
+    return {"ok": True, "username": user["username"], "secret": secret}
+
+
+@app.post("/api/webhook/revoke")
+async def revoke_webhook_secret(request: Request):
+    """Turn off the webhook entirely: clears the secret so nothing can send faxes as you."""
+    user = require_user(request)
+    db.clear_user_webhook_secret(user["id"])
+    return {"ok": True}
 
 
 @app.get("/api/users")
@@ -386,6 +421,56 @@ async def fax_image(fax_id: int, request: Request):
         raise HTTPException(403, "not your fax")
     return Response(content=fax["image"], media_type="image/png",
                     headers={"Cache-Control": "private, max-age=86400"})
+
+
+def _compose_webhook_fax(message: str, name: str, post: str, url: str) -> str:
+    """Fold a sender's message + attribution into one fax body. The printer renders the sender
+    header as 'FROM: Webhook @webhook'; this body carries who actually wrote it and its source."""
+    tail = ["— " + (name.strip() or "ẩn danh")]
+    if post.strip():
+        tail.append(post.strip())
+    if url.strip():
+        tail.append(url.strip())
+    return message.strip() + "\n\n" + "\n".join(tail)
+
+
+@app.post("/api/fax/inbound")
+async def inbound_fax(request: Request, body: str = Form(""), name: str = Form(""),
+                      post: str = Form(""), url: str = Form("")):
+    """Public webhook: any site or service (e.g. a blog comment box) can POST a message that
+    prints as a fax to a specific author. Authenticated by that author's *webhook secret*
+    (Authorization: Bearer fxwh_...), NOT a user session — the end sender has no account. A secret
+    can only ever deliver to the author who owns it. Callers hit this server-side (secret stays
+    hidden, no CORS). Rate-limited per author (secret) AND per calling-site IP — that IP is derived
+    server-side (honoring the CF/reverse-proxy headers), never taken from the body, so it can't be
+    spoofed. FaxxMe only sees the calling site, not the end visitor, so the site should add its own
+    per-visitor throttle/captcha before forwarding."""
+    authz = request.headers.get("authorization", "")
+    if not authz.lower().startswith("bearer "):
+        raise HTTPException(401, "missing webhook secret")
+    secret = authz.split(" ", 1)[1].strip()
+    author = db.get_user_by_webhook_secret(secret)
+    if not author:
+        raise HTTPException(401, "invalid webhook secret")
+
+    # tighter, dual rate limit for the public path: per author AND per (derived) calling-site IP
+    if not _window_ok(_webhook_hits, ("author", author["id"]), WEBHOOK_RATE_MAX, WEBHOOK_RATE_WINDOW):
+        raise HTTPException(429, "this webhook is faxing too fast — try again later")
+    caller_ip = _client_ip(request)
+    if caller_ip and not _window_ok(_webhook_hits, ("ip", caller_ip), WEBHOOK_RATE_MAX, WEBHOOK_RATE_WINDOW):
+        raise HTTPException(429, "this source is faxing too fast — try again in a bit")
+
+    body = body.strip()
+    if not body:
+        raise HTTPException(400, "empty message")
+    if len(body) > WEBHOOK_MSG_MAX:
+        raise HTTPException(400, f"message too long (max {WEBHOOK_MSG_MAX})")
+
+    composed = _compose_webhook_fax(body, name[:40], post[:120], url[:200])
+    sender = db.system_webhook_sender()
+    fax = db.create_fax(sender["id"], author["id"], composed)
+    delivered = await deliver(fax)
+    return {"ok": True, "fax_id": fax["id"], "delivered": delivered}
 
 
 @app.get("/api/inbox")

@@ -10,6 +10,7 @@ _printfile = tempfile.mktemp(suffix=".prn")
 os.environ["FAXXME_PRINTER_DEV"] = _printfile
 os.environ["FAXXME_LOCAL_USER"] = "bob"  # bob has the wired-in printer
 os.environ["FAXXME_FAX_RATE_MAX"] = "0"  # rate limit off by default; one test enables it
+os.environ["FAXXME_WEBHOOK_RATE_MAX"] = "0"  # inbound rate limit off by default; one test enables it
 os.environ["FAXXME_ADMIN_PASSWORD_HASH"] = hashlib.sha256(b"s3cret-admin").hexdigest()  # /admin gate
 
 from fastapi.testclient import TestClient  # noqa: E402
@@ -615,3 +616,108 @@ def test_ws_ping_pong_updates_last_seen():
         assert ws.receive_json()["type"] == "pong"     # heartbeat answered, last_seen bumped
     _admin_login()
     assert next(x for x in _admin_users() if x["username"] == "hbusr")["last_seen"]
+
+
+# ---- webhook inbound faxes (secret-key auth, no account for the end sender) ----
+
+def _secret_for(username):
+    """Register (idempotent) a user and mint a fresh webhook secret for them, logged out after."""
+    _reg(username)  # 409 if already exists — fine
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": username, "password": "pw123456"})
+    key = client.post("/api/webhook/regenerate").json()["secret"]
+    client.post("/api/logout")
+    return key
+
+
+def test_webhook_secret_lifecycle_and_me_field():
+    client.post("/api/logout")
+    client.post("/api/login", data={"username": "alice", "password": "pw123456"})
+    assert client.get("/api/me").json()["webhook_secret"] is None
+    key = client.post("/api/webhook/regenerate").json()["secret"]
+    assert key.startswith("fxwh_")
+    # the secret is retrievable (masked in the UI, plaintext here) — not shown just once
+    assert client.get("/api/me").json()["webhook_secret"] == key
+    # revoke turns it off AND stops inbound faxes
+    client.post("/api/webhook/revoke")
+    assert client.get("/api/me").json()["webhook_secret"] is None
+    client.post("/api/logout")
+    assert client.post("/api/fax/inbound", data={"body": "after revoke"},
+                       headers={"Authorization": f"Bearer {key}"}).status_code == 401
+
+
+def test_webhook_callsign_is_reserved():
+    assert client.post("/api/register",
+                       data={"username": "webhook", "password": "pw123456"}).status_code == 400
+
+
+def test_inbound_requires_valid_secret():
+    assert client.post("/api/fax/inbound", data={"body": "hi"}).status_code == 401       # no header
+    assert client.post("/api/fax/inbound", data={"body": "hi"},
+                       headers={"Authorization": "Bearer fxwh_bogus"}).status_code == 401
+
+
+def test_inbound_delivers_to_local_bridge_with_attribution():
+    """bob owns the wired printer; a reader's comment prints with '@webhook' sender + the message,
+    and lands in bob's inbox as sent by the reserved 'webhook' account (not a real user)."""
+    if os.path.exists(_printfile):
+        os.remove(_printfile)
+    open(_printfile, "wb").close()
+    assert printer.local_available()
+    key = _secret_for("bob")
+    r = client.post("/api/fax/inbound",
+                    data={"body": "loved this post!", "name": "Rita",
+                          "post": "On Faxes", "url": "https://blog.example/on-faxes"},
+                    headers={"Authorization": f"Bearer {key}"})
+    assert r.status_code == 200, r.text
+    assert r.json()["delivered"] is True
+    printed = open(_printfile, "rb").read()
+    assert b"loved this post!" in printed      # ASCII message prints natively
+    assert b"@webhook" in printed              # sender header is the system 'webhook' account
+    # visible in bob's inbox, attributed to 'webhook'
+    client.post("/api/login", data={"username": "bob", "password": "pw123456"})
+    inbox = client.get("/api/inbox").json()["faxes"]
+    assert inbox[0]["sender_name"] == "webhook"
+    client.post("/api/logout")
+
+
+def test_inbound_body_validation():
+    key = _secret_for("carol")
+    h = {"Authorization": f"Bearer {key}"}
+    assert client.post("/api/fax/inbound", data={"body": "   "}, headers=h).status_code == 400
+    assert client.post("/api/fax/inbound", data={"body": "x" * 501}, headers=h).status_code == 400
+    assert client.post("/api/fax/inbound", data={"body": "just right"}, headers=h).status_code == 200
+
+
+def test_inbound_regenerate_revokes_old_key():
+    key1 = _secret_for("erin")
+    key2 = _secret_for("erin")   # regenerate
+    assert key1 != key2
+    assert client.post("/api/fax/inbound", data={"body": "old"},
+                       headers={"Authorization": f"Bearer {key1}"}).status_code == 401
+    assert client.post("/api/fax/inbound", data={"body": "new"},
+                       headers={"Authorization": f"Bearer {key2}"}).status_code == 200
+
+
+def test_webhook_sender_hidden_from_callsign_picker():
+    # sending an inbound fax lazily creates the 'webhook' system user; it must not be faxable
+    key = _secret_for("frank")
+    client.post("/api/fax/inbound", data={"body": "spawn webhook user"},
+                headers={"Authorization": f"Bearer {key}"})
+    client.post("/api/login", data={"username": "frank", "password": "pw123456"})
+    names = [u["username"] for u in client.get("/api/users").json()["users"]]
+    assert "webhook" not in names
+    client.post("/api/logout")
+
+
+def test_inbound_rate_limit():
+    from faxxme import app as A
+    A.WEBHOOK_RATE_MAX, A.WEBHOOK_RATE_WINDOW = 2, 60
+    A._webhook_hits.clear()
+    key = _secret_for("grace")
+    h = {"Authorization": f"Bearer {key}"}
+    codes = [client.post("/api/fax/inbound", data={"body": f"m{i}"}, headers=h).status_code for i in range(4)]
+    assert codes[:2] == [200, 200]         # first 2 allowed
+    assert codes[2] == 429 and codes[3] == 429  # then rate-limited (per author + per reader IP)
+    A.WEBHOOK_RATE_MAX = 0                      # restore (off) for any other tests
+    A._webhook_hits.clear()

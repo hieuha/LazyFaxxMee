@@ -62,6 +62,13 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def new_webhook_secret() -> str:
+    """A fresh webhook secret key. The `fxwh_` prefix makes it self-identifying (vs. a printer
+    device token) and easy to spot in config files/logs. Stored in plaintext (unlike device
+    tokens) so the owner can re-view it in the UI at any time."""
+    return "fxwh_" + secrets.token_urlsafe(32)
+
+
 # ---- admin panel (single hashed password in the env, no DB user involved) ----
 
 def admin_password_hash(password: str) -> str:

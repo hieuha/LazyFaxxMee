@@ -336,6 +336,15 @@ code { background: rgba(70,240,138,.10); border: 1px solid var(--line-soft); bor
 .token-box code { flex: 1; overflow-x: auto; white-space: nowrap; background: transparent; border: none;
                   padding: 0; color: var(--amber); text-shadow: var(--glow-amber); }
 .token-box button { flex: 0 0 auto; }
+/* all secret-box controls are equal-size icon buttons (eye · copy · regenerate · revoke) */
+.token-box .icon-btn { display: inline-flex; align-items: center; justify-content: center;
+                       width: 36px; height: 32px; padding: 0; }
+.token-box .icon-btn svg { display: block; width: 16px; height: 16px; }
+
+/* webhook secret: full-width box, dots on the left, the action cluster pinned right */
+#secret-box { max-width: none; padding: 10px 12px; gap: 12px; }
+#secret-box code { letter-spacing: 2px; margin-right: 4px; }
+.secret-actions { display: flex; gap: 8px; flex: 0 0 auto; margin-left: auto; }
 
 /* image attachment preview + fax thumbnails — rendered like paper */
 #attach-preview { margin: 10px 0 2px; }

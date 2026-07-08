@@ -185,6 +185,7 @@ async function enterConsole(m) {
   }
   refreshPrinterPill();
   initTokenUI(m.has_token);
+  initWebhookUI(m.webhook_secret);
   await refreshUsers();
   await refreshLogs();
   updateComposeState();
@@ -216,6 +217,78 @@ $("token-copy").onclick = async () => {
     $("token-copy").textContent = "copied ✓";
     setTimeout(() => { $("token-copy").textContent = "copy"; }, 1500);
   } catch (_) { /* clipboard blocked on http — user can select manually */ }
+};
+
+// ---- webhook secret (lets any site fax you — e.g. a blog's comment box) ----
+// The secret is stored server-side and returned by /api/me, so we can show it (masked) anytime
+// with an eye toggle to reveal — no more "shown once". All controls are matching icon buttons.
+const _svg = (paths) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+const ICON = {
+  eyeShow: _svg('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>'),
+  eyeHide: _svg('<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>'),
+  copy: _svg('<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
+  check: _svg('<path d="M20 6 9 17l-5-5"/>'),
+  regen: _svg('<path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>'),
+  trash: _svg('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
+};
+let webhookSecret = null;     // the owner's plaintext secret, or null
+let secretRevealed = false;
+
+function renderSecretValue() {
+  $("secret-value").textContent =
+    !webhookSecret ? "" : (secretRevealed ? webhookSecret : "•".repeat(webhookSecret.length));
+}
+function setSecretRevealed(on) {
+  secretRevealed = on;
+  $("secret-eye").innerHTML = on ? ICON.eyeHide : ICON.eyeShow;
+  $("secret-eye").title = on ? "hide" : "show";
+  renderSecretValue();
+}
+function initWebhookUI(secret) {
+  webhookSecret = secret || null;
+  const has = !!webhookSecret;
+  $("secret-empty").classList.toggle("hidden", has);
+  $("secret-manage").classList.toggle("hidden", !has);
+  if (has) {
+    $("secret-copy").innerHTML = ICON.copy;
+    $("regen-secret").innerHTML = ICON.regen;
+    $("revoke-secret").innerHTML = ICON.trash;
+  }
+  setSecretRevealed(false);
+}
+function secretErr(err) {
+  const el = $("secret-status"); el.className = "msg err"; el.textContent = "✗ " + err.message;
+}
+async function generateSecret() {
+  const d = await api("/api/webhook/regenerate", { method: "POST" });
+  $("secret-status").textContent = "";
+  initWebhookUI(d.secret);
+  setSecretRevealed(true);   // reveal the fresh key so it can be copied right away
+}
+$("gen-secret").onclick = async () => {
+  try { await generateSecret(); } catch (err) { secretErr(err); }
+};
+$("regen-secret").onclick = async () => {
+  if (!(await confirmBox(
+      "Regenerate secret key? The current one stops working immediately — any site using it must be updated.",
+      { title: "regenerate secret key", ok: "REGENERATE" }))) return;
+  try { await generateSecret(); } catch (err) { secretErr(err); }
+};
+$("revoke-secret").onclick = async () => {
+  if (!(await confirmBox(
+      "Revoke the secret key? The webhook turns off until you generate a new key.",
+      { title: "revoke secret key", ok: "REVOKE" }))) return;
+  try { await api("/api/webhook/revoke", { method: "POST" }); initWebhookUI(null); }
+  catch (err) { secretErr(err); }
+};
+$("secret-eye").onclick = () => setSecretRevealed(!secretRevealed);
+$("secret-copy").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(webhookSecret || "");
+    $("secret-copy").innerHTML = ICON.check;                 // brief ✓ feedback
+    $("secret-copy").title = "copied";
+    setTimeout(() => { $("secret-copy").innerHTML = ICON.copy; $("secret-copy").title = "copy"; }, 1500);
+  } catch (_) { /* clipboard blocked on http — reveal with the eye and select manually */ }
 };
 
 // ---- recipient combobox (searchable, scales to many friends) ----

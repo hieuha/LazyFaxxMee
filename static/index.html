@@ -133,6 +133,24 @@
       <div class="token-box"><code id="token-value"></code>
         <button type="button" id="token-copy" class="ghost tiny">copy</button></div>
     </div>
+
+    <h2>:: WEBHOOK INTEGRATION <span class="small">(let any site fax you — e.g. a blog's comments)</span></h2>
+    <div class="row" id="secret-empty">
+      <button type="button" id="gen-secret" class="ghost">GENERATE SECRET KEY</button>
+    </div>
+    <div id="secret-manage" class="hidden">
+      <div class="ilabel">secret key <span class="small">— give it to your site, keep it server-side</span></div>
+      <div class="token-box" id="secret-box">
+        <code id="secret-value"></code>
+        <div class="secret-actions">
+          <button type="button" id="secret-eye" class="ghost icon-btn" title="show / hide" aria-label="show / hide secret"></button>
+          <button type="button" id="secret-copy" class="ghost icon-btn" title="copy" aria-label="copy secret"></button>
+          <button type="button" id="regen-secret" class="ghost icon-btn" title="regenerate — the current key stops working" aria-label="regenerate secret"></button>
+          <button type="button" id="revoke-secret" class="danger icon-btn" title="revoke — turns the webhook off" aria-label="revoke secret"></button>
+        </div>
+      </div>
+    </div>
+    <div class="msg" id="secret-status"></div>
   </section>
 
   <footer class="footer">
