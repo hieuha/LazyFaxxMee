@@ -19,6 +19,44 @@ The **local bridge** and the **printer-node agent** are the most reliable paths 
 ESC/POS → `/dev/usb/lp*`, no browser quirks). WebUSB is finicky and OS-dependent — see
 [platforms.md](platforms.md).
 
+## ⚡ Power & USB — the #1 cause of truncated prints and reprint loops
+
+**Do not power a thermal printer from a Raspberry Pi's USB port.** A thermal print head draws
+large current spikes while burning dots, and battery/"mobile" printers *also* draw charging
+current over the same USB cable. A Pi's USB port can't supply that — the Pi's **over-current
+protection cuts power to the port**, the printer **drops off the USB bus mid-print**, and then
+re-enumerates a second later. On repeat this looks like:
+
+- a long message or image prints only **part way**, then stops (the link died mid-write); and/or
+- the **same fax prints over and over** while the UI stays on **`queued`** (the printer
+  disconnected right after printing, so its "done" acknowledgement never reached the server, so
+  the fax was re-queued and reprinted).
+
+**How to confirm it's power** (run on the host):
+
+```bash
+dmesg | grep -iE "over-current|usblp0|disconnect" | tail    # over-current + "usblp0: removed" looping = this bug
+dmesg | grep -c over-current                                # a number that keeps climbing = ongoing
+vcgencmd get_throttled                                       # 0x0 = Pi core supply OK; non-zero = under-voltage too
+```
+
+If you see `over-current change` and `usblp0: removed` repeating (even while idle), it's power — no
+software setting can fix it.
+
+**The fix (pick one):**
+
+1. **Powered USB hub** (best) — plug the printer into a hub that has its **own** power adapter, and
+   the hub into the Pi. The printer draws current from the hub's adapter, not the Pi.
+2. **Power the printer from its own supply** — for a mobile/battery printer, **charge it from a
+   wall charger** and use the Pi's USB for *data only*; for a printer with a barrel-jack, use it.
+3. Use an **adequate Pi power supply** (official 5V/3A+ USB-C for Pi 4/5) and a **good short USB
+   cable** — a weak PSU or thin/long cable makes it worse. On some Pis, `max_usb_current=1` in
+   `/boot/firmware/config.txt` raises the per-port budget, but a powered hub is the real fix.
+
+**Software safety net:** if writes keep failing, FaxxMe/the agent **gives up after
+`FAXXME_BRIDGE_MAX_ATTEMPTS` tries** (default `3`) and marks the fax delivered, so a flaky printer
+can't reprint forever. That bounds the damage — it does **not** replace fixing the power.
+
 ## What works well
 
 Any **USB ESC/POS thermal printer** that the OS exposes as a raw line printer. Known-good

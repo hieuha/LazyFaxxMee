@@ -18,6 +18,42 @@ rẻ đều hiểu. Có ba cách để các byte đến được máy in; mỗi 
 `/dev/usb/lp*`, không dính các trò lắt léo của trình duyệt). WebUSB thì đỏng đảnh và phụ thuộc OS —
 xem [platforms.md](platforms.md).
 
+## ⚡ Nguồn & USB — nguyên nhân số 1 gây in cụt và loop in lại
+
+**Đừng cấp nguồn cho máy in nhiệt từ cổng USB của Raspberry Pi.** Đầu in nhiệt hút **dòng đỉnh
+lớn** khi in, và máy in loại "mobile"/có pin còn **hút thêm dòng sạc** qua cùng sợi cáp USB. Cổng
+USB của Pi không cấp nổi — **mạch bảo vệ over-current của Pi cắt điện cổng**, máy in **rớt khỏi bus
+USB giữa lúc in**, rồi ~1 giây sau nối lại. Lặp lại thì biểu hiện là:
+
+- tin dài hoặc ảnh chỉ in được **một đoạn** rồi dừng (kết nối chết giữa chừng); và/hoặc
+- **cùng một fax in đi in lại** trong khi UI vẫn báo **`queued`** (máy in rớt ngay sau khi in xong
+  nên tín hiệu "đã in" không về được server → fax bị xếp hàng lại → in tiếp).
+
+**Cách xác nhận là do nguồn** (chạy trên host):
+
+```bash
+dmesg | grep -iE "over-current|usblp0|disconnect" | tail    # over-current + "usblp0: removed" lặp = đúng lỗi này
+dmesg | grep -c over-current                                # số cứ tăng = đang diễn ra
+vcgencmd get_throttled                                       # 0x0 = nguồn lõi Pi OK; khác 0 = sụt áp thêm
+```
+
+Nếu thấy `over-current change` và `usblp0: removed` lặp liên tục (**kể cả lúc rảnh**) thì là nguồn —
+không thiết lập phần mềm nào chữa được.
+
+**Cách sửa (chọn một):**
+
+1. **USB hub có nguồn riêng** (tốt nhất) — cắm máy in vào hub **có adapter điện riêng**, rồi hub nối
+   vào Pi. Máy in lấy dòng từ adapter của hub, không rút từ Pi.
+2. **Cấp nguồn riêng cho máy in** — máy in mobile/pin thì **sạc bằng sạc tường**, chỉ dùng USB của Pi
+   cho *data*; máy in có giắc nguồn thì dùng giắc đó.
+3. Dùng **nguồn Pi đủ mạnh** (USB-C 5V/3A+ chính hãng cho Pi 4/5) và **cáp USB tốt, ngắn** — nguồn
+   yếu hoặc cáp mỏng/dài làm nặng thêm. Vài dòng Pi có thể đặt `max_usb_current=1` trong
+   `/boot/firmware/config.txt` để nới giới hạn cổng, nhưng powered hub mới là cách chuẩn.
+
+**Lưới an toàn phần mềm:** nếu ghi cứ lỗi, FaxxMe/agent sẽ **bỏ cuộc sau `FAXXME_BRIDGE_MAX_ATTEMPTS`
+lần** (mặc định `3`) và đánh dấu fax đã giao, để máy in chập chờn **không in lại vô hạn**. Cái này
+chỉ **giới hạn thiệt hại**, không thay cho việc sửa nguồn.
+
 ## Cái gì chạy tốt
 
 Bất kỳ **máy in nhiệt USB ESC/POS** nào mà OS phơi ra dưới dạng một máy in dòng (line printer) thô.

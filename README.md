@@ -96,6 +96,8 @@ All configuration is via environment variables:
 | `FAXXME_LOCAL_USER` | *(unset)* | callsign whose faxes print on THIS host's printer (enables the local bridge) |
 | `FAXXME_PRINTER_DEV` | `/dev/usb/lp0` | printer device node for the local bridge |
 | `FAXXME_PRINTER_POLL` | `4` | seconds between printer hot-replug checks |
+| `FAXXME_BRIDGE_MAX_ATTEMPTS` | `3` | give up (and mark delivered) after this many failed writes to a flaky printer, so it can't reprint forever — see [docs/printers.md](docs/printers.md) (Power & USB) |
+| `FAXXME_WRITE_DELAY` / `FAXXME_WRITE_CHUNK` | `0` / `4096` | pause (s) between / size (bytes) of chunks written to the printer device; raise the delay to pace a printer whose buffer can't keep up |
 | `FAXXME_CUT` | `full` | end-of-fax cut: `full` / `feed` (feed-to-cutter) / `partial` / `none` |
 | `FAXXME_WIDTH` | `32` | text columns (58mm ≈ 32, 80mm ≈ 48) |
 | `FAXXME_PRINT_DOTS` | `384` | image raster width in dots (58mm ≈ 384, 80mm ≈ 576) |

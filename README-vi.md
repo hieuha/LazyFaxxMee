@@ -97,6 +97,8 @@ Mọi cấu hình đều thông qua biến môi trường:
 | `FAXXME_LOCAL_USER` | *(không đặt)* | callsign có fax được in trên máy in của CHÍNH host này (bật local bridge) |
 | `FAXXME_PRINTER_DEV` | `/dev/usb/lp0` | node thiết bị máy in cho local bridge |
 | `FAXXME_PRINTER_POLL` | `4` | số giây giữa các lần kiểm tra cắm-lại-nóng máy in |
+| `FAXXME_BRIDGE_MAX_ATTEMPTS` | `3` | bỏ cuộc (đánh dấu đã giao) sau ngần này lần ghi lỗi tới máy in chập chờn, để không in lại vô hạn — xem [docs/vi/printers.md](docs/vi/printers.md) (Nguồn & USB) |
+| `FAXXME_WRITE_DELAY` / `FAXXME_WRITE_CHUNK` | `0` / `4096` | thời gian nghỉ (giây) giữa / kích thước (byte) mỗi chunk ghi ra máy in; tăng delay để dàn nhịp cho máy in buffer yếu |
 | `FAXXME_CUT` | `full` | cắt giấy cuối mỗi bản fax: `full` / `feed` (đẩy tới dao cắt) / `partial` / `none` |
 | `FAXXME_WIDTH` | `32` | số cột chữ (58mm ≈ 32, 80mm ≈ 48) |
 | `FAXXME_PRINT_DOTS` | `384` | bề rộng raster ảnh tính bằng dot (58mm ≈ 384, 80mm ≈ 576) |
