@@ -616,7 +616,10 @@ function setPrinter(state, cls) {
 
 // pick the best available print path for the PRINTER pill + button states
 function refreshPrinterPill() {
-  if (usb) setPrinter("ONLINE", "on");            // a printer bound in this browser
+  if (usb) {                                      // a printer bound in this browser -> name it
+    const name = usb.device.productName || "USB printer";
+    setPrinter(`ONLINE · ${name} (if#${usb.iface} ep#${usb.endpoint})`, "on");
+  }
   else if (nodeOnline) setPrinter("NODE ✓", "on"); // an agent (Pi node) is printing for me
   else if (localBridge) setPrinter("WIRED", "on"); // this host prints for my callsign
   else setPrinter("OFFLINE", "off");
