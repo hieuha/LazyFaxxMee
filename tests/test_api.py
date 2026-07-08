@@ -758,6 +758,29 @@ def test_write_all_survives_short_writes():
     assert ok and bytes(got) == data      # every byte arrived, in order
 
 
+def test_bridge_print_gives_up_after_failures():
+    """A printer that keeps failing to write must not be reprinted forever — after
+    BRIDGE_MAX_ATTEMPTS the fax is marked delivered (given up) so the flush loop stops."""
+    import asyncio
+    from faxxme import app as A, db, printer as P
+    _reg("alice"); _reg("bob")
+    sender = db.get_user_by_name("alice")
+    rcpt = db.get_user_by_name("bob")
+    fid = db.create_fax(sender["id"], rcpt["id"], "boom")["id"]
+    orig = P.print_local
+    P.print_local = lambda data: False           # simulate a printer that always fails the write
+    try:
+        A._bridge_attempts.pop(fid, None)
+        asyncio.run(A._bridge_print(db.get_fax(fid)))
+        assert db.get_fax(fid)["status"] == "pending"        # still retrying before the cap
+        for _ in range(A.BRIDGE_MAX_ATTEMPTS - 1):
+            asyncio.run(A._bridge_print(db.get_fax(fid)))
+        assert db.get_fax(fid)["status"] == "delivered"      # gave up -> stops re-queuing
+        assert fid not in A._bridge_attempts
+    finally:
+        P.print_local = orig
+
+
 def test_escpos_injection_stripped_from_body():
     """Control bytes in a fax body must not reach the printer as ESC/POS commands."""
     client.post("/api/logout")

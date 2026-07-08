@@ -16,6 +16,12 @@ from . import auth, db, imaging, printer
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "static")
 PRINTER_POLL = float(os.environ.get("FAXXME_PRINTER_POLL", "4"))  # seconds between printer checks
 
+# Host-bridge print retries. If a write to the wired printer keeps failing (e.g. an underpowered
+# printer that stalls / re-enumerates mid-print), give up after this many attempts instead of
+# reprinting the same fax forever. Attempts are counted per fax id across flush cycles.
+BRIDGE_MAX_ATTEMPTS = int(os.environ.get("FAXXME_BRIDGE_MAX_ATTEMPTS", "3"))
+_bridge_attempts: dict[int, int] = {}
+
 # per-sender fax rate limit (anti-spam so nobody floods a friend's paper roll)
 FAX_RATE_MAX = int(os.environ.get("FAXXME_FAX_RATE_MAX", "20"))         # max faxes per window (0 = off)
 FAX_RATE_WINDOW = float(os.environ.get("FAXXME_FAX_RATE_WINDOW", "60"))  # window, seconds
@@ -221,9 +227,7 @@ async def deliver(fax: dict) -> bool:
             return True  # client will ack -> mark delivered
     # 2) local bridge for the host-attached printer?
     if recipient and recipient["username"] == printer.LOCAL_USER and printer.local_available():
-        if printer.print_local(render_escpos(fax)):
-            db.mark_delivered(fax["id"])
-            return True
+        return await _bridge_print(fax)
     return False
 
 
@@ -241,6 +245,30 @@ async def _notify_status(fax_id: int) -> None:
                 pass
 
 
+async def _bridge_print(fax: dict) -> bool:
+    """Print a fax on the host's wired printer, off the event loop (the write may block/pace, so it
+    runs in a worker thread). Marks the fax delivered on success. If the write keeps failing —
+    typically an underpowered printer stalling/re-enumerating mid-print — give up after
+    BRIDGE_MAX_ATTEMPTS and mark it delivered anyway, so the flusher stops reprinting it forever.
+    Returns True only if it actually printed."""
+    fid = fax["id"]
+    ok = await asyncio.to_thread(printer.print_local, render_escpos(fax))
+    if ok:
+        _bridge_attempts.pop(fid, None)
+        db.mark_delivered(fid)
+        await _notify_status(fid)
+        return True
+    n = _bridge_attempts.get(fid, 0) + 1
+    _bridge_attempts[fid] = n
+    print(f"[faxxme] bridge print failed for fax {fid} (attempt {n}/{BRIDGE_MAX_ATTEMPTS})", flush=True)
+    if n >= BRIDGE_MAX_ATTEMPTS:
+        _bridge_attempts.pop(fid, None)
+        db.mark_delivered(fid)          # give up so it stops re-queuing; check printer power/USB
+        await _notify_status(fid)
+        print(f"[faxxme] gave up printing fax {fid} — check the printer's power/USB cable", flush=True)
+    return False
+
+
 async def _flush_local_bridge() -> None:
     """Print faxes queued for the host printer once it's available (boot or hot-replug)."""
     if not (printer.LOCAL_USER and printer.local_available()):
@@ -251,9 +279,7 @@ async def _flush_local_bridge() -> None:
     for fax in db.pending_for(u["id"]):
         if presence.online(u["id"]):
             continue  # a live browser session handles delivery for this user
-        if printer.print_local(render_escpos(fax)):
-            db.mark_delivered(fax["id"])
-            await _notify_status(fax["id"])
+        await _bridge_print(fax)   # marks delivered on success, or gives up after N failures
 
 
 async def _printer_watch() -> None:

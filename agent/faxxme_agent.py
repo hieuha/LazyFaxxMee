@@ -27,6 +27,9 @@ USER = os.environ.get("FAXXME_AGENT_USER", "").strip()
 TOKEN = os.environ.get("FAXXME_AGENT_TOKEN", "").strip()
 DEVICE = os.environ.get("FAXXME_PRINTER_DEV", "/dev/usb/lp0")
 POLL = float(os.environ.get("FAXXME_PRINTER_POLL", "4"))
+# If a write keeps failing (e.g. an underpowered printer that stalls/re-enumerates mid-print),
+# ack + drop the fax after this many attempts instead of reprinting it forever.
+MAX_ATTEMPTS = int(os.environ.get("FAXXME_BRIDGE_MAX_ATTEMPTS", "3"))
 AGENT_UA = "FaxxMe-Agent/0.1 (+https://github.com/hieuha/LazyFaxxMee)"
 
 
@@ -52,22 +55,28 @@ def write_device(data: bytes) -> bool:
     # Loop until every byte is written: a single os.write to a USB printer often accepts only part
     # of a large buffer (returns a short count), so long messages/images would otherwise print
     # truncated. Chunking also lets the blocking device throttle us to the printer's buffer.
+    # Return True as soon as all bytes are written — a failure while *closing* the fd (printer
+    # dropped off USB right after a full print) must not mask a successful write, or we'd reprint.
+    fd = None
     try:
         fd = os.open(DEVICE, os.O_WRONLY)
-        try:
-            view = memoryview(data)
-            total, sent = len(view), 0
-            while sent < total:
-                w = os.write(fd, view[sent:sent + 4096])
-                if w <= 0:
-                    return False
-                sent += w
-        finally:
-            os.close(fd)
+        view = memoryview(data)
+        total, sent = len(view), 0
+        while sent < total:
+            w = os.write(fd, view[sent:sent + 4096])
+            if w <= 0:
+                return False
+            sent += w
         return True
     except OSError as e:
         log("device write failed:", e)
         return False
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 async def run_once():
@@ -77,17 +86,31 @@ async def run_once():
                                   ping_interval=20, ping_timeout=20) as ws:
         log("connected to", ws_url(), "as", USER)
         pending: dict[int, bytes] = {}     # fax_id -> ready-to-print ESC/POS bytes
+        attempts: dict[int, int] = {}      # fax_id -> failed write attempts (for the give-up cap)
         lock = asyncio.Lock()
+
+        async def _ack(fid):
+            await ws.send(json.dumps({"type": "ack", "fax_id": fid}))
+            del pending[fid]
+            attempts.pop(fid, None)
 
         async def flush():
             async with lock:               # serialize printing so a fax never prints twice
                 for fid in list(pending):
-                    if device_writable() and write_device(pending[fid]):
-                        await ws.send(json.dumps({"type": "ack", "fax_id": fid}))
-                        del pending[fid]
+                    if not device_writable():
+                        return             # printer truly offline -> try again on the next tick
+                    if write_device(pending[fid]):
+                        await _ack(fid)
                         log("printed fax", fid)
                     else:
-                        return             # printer offline -> try again on the next tick
+                        n = attempts.get(fid, 0) + 1
+                        attempts[fid] = n
+                        log(f"print failed for fax {fid} (attempt {n}/{MAX_ATTEMPTS})")
+                        if n >= MAX_ATTEMPTS:
+                            await _ack(fid)   # give up: stop reprinting; check printer power/USB
+                            log(f"gave up on fax {fid} — check the printer's power/USB cable")
+                        else:
+                            return         # retry this fax on the next tick
             return
 
         async def retry_loop():

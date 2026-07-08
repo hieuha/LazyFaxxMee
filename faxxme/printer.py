@@ -134,29 +134,42 @@ def local_available() -> bool:
     return LOCAL_USER is not None and os.access(LOCAL_DEVICE, os.W_OK)
 
 
-def _write_all(fd: int, data: bytes, chunk: int = 4096) -> bool:
+WRITE_CHUNK = int(os.environ.get("FAXXME_WRITE_CHUNK", "4096"))    # bytes per os.write to the device
+WRITE_DELAY = float(os.environ.get("FAXXME_WRITE_DELAY", "0"))     # seconds to pause between chunks
+
+
+def _write_all(fd: int, data: bytes) -> bool:
     """Write every byte, tolerating short writes. A single os.write to a USB printer char device
     often accepts only part of a large buffer and returns a short count; without looping the rest
     is silently dropped — long messages/images then print truncated. Chunking also lets the
-    (blocking) device apply backpressure so we don't overrun the printer's small buffer."""
+    (blocking) device apply backpressure; `FAXXME_WRITE_DELAY` adds a pause between chunks to pace
+    a printer whose buffer can't keep up. Runs in a worker thread (see app._bridge_print)."""
     view = memoryview(data)
     total = len(view)
     sent = 0
     while sent < total:
-        w = os.write(fd, view[sent:sent + chunk])
+        w = os.write(fd, view[sent:sent + WRITE_CHUNK])
         if w <= 0:
             return False
         sent += w
+        if WRITE_DELAY and sent < total:
+            time.sleep(WRITE_DELAY)
     return True
 
 
 def print_local(data: bytes) -> bool:
-    """Write raw ESC/POS bytes straight to the local printer device."""
+    """Write raw ESC/POS bytes straight to the local printer device. Returns True once all bytes
+    are written — a failure while *closing* the fd (e.g. the printer dropped off USB right after a
+    full print) must not mask a successful write, or the fax gets reprinted."""
+    fd = None
     try:
         fd = os.open(LOCAL_DEVICE, os.O_WRONLY)
-        try:
-            return _write_all(fd, data)
-        finally:
-            os.close(fd)
+        return _write_all(fd, data)
     except OSError:
         return False
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
