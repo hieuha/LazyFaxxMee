@@ -27,7 +27,7 @@ LOCAL_DEVICE = os.environ.get("FAXXME_PRINTER_DEV", "/dev/usb/lp0")
 LOCAL_USER = os.environ.get("FAXXME_LOCAL_USER")  # username whose faxes print on this host
 LOCAL_WIDTH = int(os.environ.get("FAXXME_WIDTH", "32"))  # chars per line (58mm ~= 32)
 CUT_MODE = os.environ.get("FAXXME_CUT", "full").lower()  # full | partial | feed | none
-FOOTER_FONT_SIZE = int(os.environ.get("FAXXME_FOOTER_FONT_SIZE", "18"))  # small attribution raster
+FOOTER_FONT_SIZE = int(os.environ.get("FAXXME_FOOTER_FONT_SIZE", "22"))  # small attribution raster
 
 
 def _wrap(text: str, width: int) -> list[str]:

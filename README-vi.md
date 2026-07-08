@@ -108,7 +108,7 @@ Mọi cấu hình đều thông qua biến môi trường:
 | `FAXXME_FONT` | Play đóng kèm (Google Fonts) | TTF dùng để dựng chữ non-ASCII (tiếng Việt, emoji…) |
 | `FAXXME_FONT_SIZE` | `26` | cỡ font khi dựng chữ Unicode |
 | `FAXXME_FONT_THRESHOLD` | `176` | ngưỡng đen/trắng khi dựng chữ (cao hơn = đậm hơn) |
-| `FAXXME_FOOTER_FONT_SIZE` | `18` | cỡ chữ khối ghi nguồn nhỏ của webhook (name/post/url) |
+| `FAXXME_FOOTER_FONT_SIZE` | `22` | cỡ chữ khối ghi nguồn nhỏ của webhook (name/post/url) |
 | `FAXXME_DB` / `FAXXME_SECRET` | trong repo | đường dẫn sqlite + secret của phiên |
 
 ## API

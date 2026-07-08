@@ -214,7 +214,7 @@ so the stakes are low; still, protect DB access and backups accordingly.
 
 The sender header is always the system account — `FROM: Webhook @webhook` — the message prints at
 normal size, and the attribution block (`name`, `post`, `url`) prints in a **smaller font**
-underneath (size via `FAXXME_FOOTER_FONT_SIZE`, default 18):
+underneath (size via `FAXXME_FOOTER_FONT_SIZE`, default 22):
 
 ```
         FAXXME

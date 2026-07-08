@@ -214,7 +214,7 @@ bản backup cho phù hợp.
 
 Header người gửi luôn là tài khoản hệ thống — `FROM: Webhook @webhook` — message in cỡ thường, còn
 khối ghi nguồn (`name`, `post`, `url`) in **chữ nhỏ hơn** ở dưới (cỡ theo `FAXXME_FOOTER_FONT_SIZE`,
-mặc định 18):
+mặc định 22):
 
 ```
         FAXXME
