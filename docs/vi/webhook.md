@@ -61,9 +61,9 @@ curl -X POST https://fax.hatrunghieu.com/api/fax/inbound \
 | `post` | – | 120 | tiêu đề nguồn, ví dụ tên bài viết |
 | `url` | – | 200 | URL nguồn |
 
-> **Không có trường IP** — FaxxMe tự suy ra IP client (honor header CF/reverse-proxy) để rate-limit
-> theo IP, nên không thể spoof qua body request. IP đó là server **site gọi** của bạn, không phải
-> người xem cuối, vì vậy hãy tự thêm throttle theo từng người xem (xem [Bảo mật](#bảo-mật--bảo-vệ)).
+> **Không có trường IP** — FaxxMe tự suy ra IP client (từ kết nối / header CF/reverse-proxy) để
+> rate-limit theo IP. IP đó là server **site gọi** của bạn, không phải người xem cuối, vì vậy hãy
+> tự thêm throttle theo từng người xem (xem [Bảo mật](#bảo-mật--bảo-vệ)).
 
 ### Phản hồi
 
@@ -159,10 +159,15 @@ const r = await fetch("https://fax.hatrunghieu.com/api/fax/inbound", {
   HTTPS (Cloudflare + Caddy); đừng hạ xuống HTTP.
 - **Phạm vi hẹp theo thiết kế.** Một secret **chỉ** gửi fax được cho đúng tác giả sở hữu nó. Không
   có **trường người nhận** — secret bị lộ chỉ có thể spam cuộn giấy *của bạn*, không gì khác.
-- **Rate-limit hai tầng.** FaxxMe giới hạn fax inbound **theo tác giả** và **theo IP site gọi**,
-  IP này được suy ra phía server (honor header CF/reverse-proxy) — *không* lấy từ request nên không
-  spoof được. FaxxMe chỉ thấy server của bạn, không thấy người xem cuối, nên site của bạn *cũng nên*
-  tự rate-limit / captcha từng người xem trước khi chuyển tiếp.
+- **Rate-limit hai tầng.** FaxxMe giới hạn fax inbound **theo tác giả (secret)** và **theo IP site
+  gọi**. Giới hạn theo tác giả là lớp chính, không bypass được. Giới hạn theo IP dùng IP client mà
+  FaxxMe suy ra từ kết nối / header reverse-proxy: đáng tin **khi sau proxy tin cậy** (Cloudflare/
+  Caddy ghi đè các header đó), nhưng nếu origin truy cập trực tiếp được thì có thể bị spoof — nên
+  coi là "best-effort". FaxxMe chỉ thấy server của bạn, không thấy người xem cuối, nên site *cũng
+  nên* tự rate-limit / captcha từng người xem.
+- **Nội dung được làm sạch trước khi in.** Byte điều khiển (ESC/GS…) trong message, tên người gửi,
+  hay nguồn đều bị loại tại ranh giới render, nên nội dung webhook không thể inject lệnh ESC/POS thô
+  vào máy in.
 - **In ngay (fire-and-forget).** Tin được nhận sẽ in luôn, người gửi ghi là tài khoản dành riêng
   `@webhook`. Không có bước duyệt của người, nên các biện pháp chống lạm dụng ở trên rất quan trọng.
   Nếu bị spam, **thu hồi secret** — có hiệu lực tức thì.

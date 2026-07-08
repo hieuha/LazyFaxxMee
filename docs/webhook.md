@@ -60,10 +60,9 @@ curl -X POST https://fax.hatrunghieu.com/api/fax/inbound \
 | `post` | – | 120 | source title, e.g. a blog post title |
 | `url` | – | 200 | source URL |
 
-> There is **no IP field** — FaxxMe derives the client IP itself (honoring the CF/reverse-proxy
-> headers) for per-IP rate limiting, so it can't be spoofed via the request body. That IP is your
-> **calling site's** server, not the end visitor, so add your own per-visitor throttle (see
-> [Security](#security--protection)).
+> There is **no IP field** — FaxxMe derives the client IP itself (from the connection / CF /
+> reverse-proxy headers) for per-IP rate limiting. That IP is your **calling site's** server, not
+> the end visitor, so add your own per-visitor throttle (see [Security](#security--protection)).
 
 ### Response
 
@@ -159,10 +158,15 @@ const r = await fetch("https://fax.hatrunghieu.com/api/fax/inbound", {
   HTTPS (Cloudflare + Caddy); don't downgrade it.
 - **Scope is narrow by design.** A secret can *only* deliver a fax to the author who owns it.
   There is **no recipient field** — a leaked secret can spam *your* paper roll, nothing else.
-- **Two-layer rate limiting.** FaxxMe limits inbound faxes **per author** and **per calling-site
-  IP**, which it derives server-side (honoring CF/reverse-proxy headers) — it is *not* taken from
-  the request, so a caller can't spoof it. FaxxMe only sees your server, not the end visitor, so
-  your site should *also* rate-limit / captcha each visitor before forwarding.
+- **Two-layer rate limiting.** FaxxMe limits inbound faxes **per author (the secret)** and **per
+  calling-site IP**. The per-author limit is the primary guard and can't be bypassed. The per-IP
+  limit uses the client IP FaxxMe derives from the connection / reverse-proxy headers: reliable
+  **behind a trusted proxy** (Cloudflare/Caddy, which overwrite those headers), but a
+  directly-reachable origin could spoof it — so treat per-IP as best-effort. FaxxMe only sees your
+  server, not the end visitor, so your site should *also* rate-limit / captcha each visitor.
+- **Content is sanitized before printing.** Control bytes (ESC/GS, etc.) in the message, sender
+  name, or source are stripped at the render boundary, so webhook content can't inject raw ESC/POS
+  commands into the printer.
 - **Fire-and-forget printing.** Accepted messages print immediately, attributed to the reserved
   `@webhook` sender. There is no human moderation step, so the abuse controls above matter. If you
   are being spammed, **revoke the secret** — it stops instantly.

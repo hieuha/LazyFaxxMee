@@ -21,11 +21,11 @@ around, or the moment their printer comes back if not.
 
 | file | role |
 |------|------|
-| `faxxme/app.py` | FastAPI routes, WebSocket presence, delivery logic, printer watcher, device tokens |
-| `faxxme/db.py` | SQLite (stdlib): `users` (+ device-token hash) + `faxes` (dithered-image BLOB, per-side delete flags) |
-| `faxxme/auth.py` | pbkdf2 passwords + hmac session cookies + device tokens (no native deps) |
-| `faxxme/printer.py` | builds the ESC/POS receipt, auto-cut, and the local `/dev` printer bridge |
-| `faxxme/imaging.py` | image → Floyd–Steinberg 1-bit halftone → `GS v 0` raster (Pillow) |
+| `faxxme/app.py` | FastAPI routes, WebSocket presence, delivery logic, printer watcher, device tokens, webhook inbound |
+| `faxxme/db.py` | SQLite (stdlib): `users` (+ device-token hash, webhook secret, session epoch) + `faxes` (dithered-image BLOB, per-side delete flags) |
+| `faxxme/auth.py` | pbkdf2 passwords + hmac session cookies (with a per-user epoch) + device tokens (no native deps) |
+| `faxxme/printer.py` | builds the ESC/POS receipt (control bytes stripped), auto-cut, local `/dev` printer bridge |
+| `faxxme/imaging.py` | image → Floyd–Steinberg 1-bit halftone → `GS v 0` raster (Pillow); pixel-count bomb guard |
 | `static/` | the CRT single-page UI (WebUSB + WebSocket client) |
 | `agent/` | the headless printer-node agent for a Raspberry Pi (see [../agent/README.md](../agent/README.md)) |
 
@@ -55,6 +55,15 @@ tries three things in order:
    host's printer device is writable, the server prints the bytes itself to
    `FAXXME_PRINTER_DEV` (e.g. `/dev/usb/lp0`) and marks it `delivered`. No browser needed.
 3. **Neither** → the fax stays `pending` in SQLite.
+
+## Webhook inbound (fax from a blog, etc.)
+
+An external site can also send a fax on behalf of someone with no account, via
+`POST /api/fax/inbound`. It authenticates with the recipient author's **webhook secret** (a
+`Bearer fxwh_…` token, not a session), composes the message + attribution into a fax from the
+reserved `webhook` system account, and hands it to the same `deliver()` above. Rate-limited per
+author and per calling-site IP; content is sanitized before printing. Full design in
+[Webhook integration](webhook.md).
 
 ## Delivery on return
 

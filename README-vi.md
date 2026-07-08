@@ -38,6 +38,7 @@ flowchart LR
   - *Local bridge* — một máy in cắm thẳng vào máy chủ sẽ in ngay tại phía máy chủ, không cần trình duyệt.
   - *Node in (agent)* — một [agent](agent/README-vi.md) chạy nền trên chiếc Raspberry Pi của người nhận, xác thực bằng **device token**, in các bản fax ngay tại chỗ.
 - **Device token** — token API riêng cho mỗi tài khoản dành cho agent (lưu dạng băm sha256, chỉ hiện một lần); tạo lại (regenerate) để **thu hồi tức thì** (agent đang kết nối sẽ bị ngắt ngay).
+- **Tích hợp webhook** — cho phép bất kỳ site nào fax cho bạn (ví dụ ô comment blog) qua **secret key** theo tác giả và `POST /api/fax/inbound`, người gửi không cần tài khoản. Xem [Tích hợp webhook](#tích-hợp-webhook).
 - **Trạng thái máy in trực tiếp** — pill PRINTER hiển thị đường in tốt nhất đang có (`ONLINE` USB trình duyệt · `NODE ✓` agent · `WIRED` cầu nối · `OFFLINE`) và cập nhật theo thời gian thực; **TEST** in một trang thử trên bất cứ đường in nào bạn đang có.
 - **Chữ Unicode** — những dòng có tiếng Việt, emoji, hay bất cứ ký tự nào bảng mã của máy in không hiển thị được sẽ tự động được dựng bằng font đóng kèm thành một raster `GS v 0` sắc nét; những dòng thuần ASCII vẫn dùng text ESC/POS gốc cho nhanh.
 - **Ảnh đính kèm** — được dither Floyd–Steinberg thành halftone 1-bit (raster `GS v 0`), kèm bản xem trước ngay ở phía client.
@@ -100,7 +101,8 @@ Mọi cấu hình đều thông qua biến môi trường:
 | `FAXXME_WIDTH` | `32` | số cột chữ (58mm ≈ 32, 80mm ≈ 48) |
 | `FAXXME_PRINT_DOTS` | `384` | bề rộng raster ảnh tính bằng dot (58mm ≈ 384, 80mm ≈ 576) |
 | `FAXXME_IMG_MAX_H` | `1200` | chiều cao ảnh in tối đa (dot) |
-| `FAXXME_MAX_UPLOAD` | `6291456` | dung lượng ảnh tải lên tối đa (byte, 6 MB) |
+| `FAXXME_MAX_UPLOAD` | `6291456` | dung lượng ảnh tải lên tối đa (byte, 6 MB đã nén) |
+| `FAXXME_MAX_PIXELS` | `24000000` | số pixel tối đa sau giải nén (w×h); vượt là bị từ chối trước khi decode (chống bomb) |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | giới hạn tần suất theo người gửi: tối đa N bản fax mỗi N giây (0 = tắt) |
 | `FAXXME_WEBHOOK_RATE_MAX` / `FAXXME_WEBHOOK_RATE_WINDOW` | `5` / `300` | giới hạn fax gửi qua webhook, áp theo tác giả **và** theo IP site gọi (0 = tắt) |
 | `FAXXME_WEBHOOK_MSG_MAX` | `500` | số ký tự tối đa trong tin nhắn gửi qua webhook |
@@ -151,7 +153,7 @@ Site gọi FaxxMe **phía server**, không phải từ trình duyệt người x
 
 **Thiết lập (tác giả):** đăng nhập → `:: WEBHOOK INTEGRATION → GENERATE SECRET KEY`. Key (`fxwh_…`) hiện dạng che — bấm **con mắt** để hiện, **copy** để sao chép (secret vẫn xem lại được trong khối). Đưa cho người quản trị site để lưu **phía server** (ví dụ trong `.env` của site). Nút `↻` xoay key (key cũ chết ngay); `revoke` tắt hẳn webhook.
 
-**Phạm vi & an toàn:** một secret key **chỉ** gửi fax được cho đúng tác giả sở hữu nó — không có trường người nhận để nhắm tới ai khác. Fax inbound bị giới hạn tần suất theo tác giả **và** theo IP site gọi (suy ra phía server, không spoof được; `FAXXME_WEBHOOK_RATE_MAX`/`FAXXME_WEBHOOK_RATE_WINDOW`), tin nhắn giới hạn `FAXXME_WEBHOOK_MSG_MAX` ký tự, và in ngay (fire-and-forget) với người gửi là tài khoản dành riêng `@webhook`. Bị spam? Cứ revoke key.
+**Phạm vi & an toàn:** một secret key **chỉ** gửi fax được cho đúng tác giả sở hữu nó — không có trường người nhận để nhắm tới ai khác. Fax inbound bị giới hạn tần suất theo tác giả **và** theo IP site gọi (`FAXXME_WEBHOOK_RATE_MAX`/`FAXXME_WEBHOOK_RATE_WINDOW`), tin nhắn giới hạn `FAXXME_WEBHOOK_MSG_MAX` ký tự, ký tự điều khiển bị loại trước khi in, và in ngay (fire-and-forget) với người gửi là tài khoản dành riêng `@webhook`. Giới hạn theo tác giả (secret) là lớp chính; giới hạn theo IP chỉ đáng tin khi đứng sau reverse proxy tin cậy. Bị spam? Cứ revoke key.
 
 **`POST /api/fax/inbound`** — `Content-Type: application/x-www-form-urlencoded`, header `Authorization: Bearer <secret key>`:
 
@@ -162,7 +164,7 @@ Site gọi FaxxMe **phía server**, không phải từ trình duyệt người x
 | `post` | – | tiêu đề nguồn, ví dụ tên bài viết (≤ 120) |
 | `url` | – | URL nguồn (≤ 200) |
 
-FaxxMe tự suy ra IP client để rate-limit theo IP (không có trường IP để spoof); IP đó là server site gọi của bạn, nên hãy tự thêm throttle theo từng người xem. Chi tiết trong [docs/vi/webhook.md](docs/vi/webhook.md).
+Không có trường IP để spoof — FaxxMe lấy IP client từ kết nối (qua header reverse-proxy). Đứng sau proxy tin cậy (Cloudflare/Caddy) thì đáng tin; nếu origin truy cập trực tiếp được thì có thể bị spoof, nên coi giới hạn theo IP là "best-effort". IP đó dù sao cũng là server site gọi của bạn, nên hãy tự thêm throttle theo từng người xem. Chi tiết trong [docs/vi/webhook.md](docs/vi/webhook.md).
 
 Trả về `{ "ok": true, "fax_id": …, "delivered": bool }`. Lỗi: `401` (thiếu/sai secret), `400` (rỗng/quá dài), `429` (bị giới hạn).
 

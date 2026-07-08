@@ -37,6 +37,7 @@ flowchart LR
   - *Local bridge* — a printer wired into the server host prints server-side, no browser needed.
   - *Printer node (agent)* — a headless [agent](agent/README.md) on the recipient's own Raspberry Pi, authenticated with a **device token**, prints faxes locally.
 - **Device tokens** — per-account API token for the agent (sha256-hashed, shown once); regenerate to **revoke instantly** (the connected agent is kicked).
+- **Webhook integration** — let any external site fax you (e.g. a blog's comment box) via a per-author **secret key** and `POST /api/fax/inbound`, no account needed for the sender. See [Webhook integration](#webhook-integration).
 - **Live printer status** — the PRINTER pill shows the best available path (`ONLINE` browser USB · `NODE ✓` agent · `WIRED` bridge · `OFFLINE`) and updates in real time; **TEST** prints a test page on whichever you have.
 - **Unicode text** — lines with Vietnamese, emoji, or anything the printer's code page can't show are auto-rendered with a bundled font as a crisp `GS v 0` raster; pure-ASCII lines stay fast native ESC/POS text.
 - **Image attachments** — Floyd–Steinberg dithered to 1-bit halftone (`GS v 0` raster), with a live client-side preview.
@@ -99,7 +100,8 @@ All configuration is via environment variables:
 | `FAXXME_WIDTH` | `32` | text columns (58mm ≈ 32, 80mm ≈ 48) |
 | `FAXXME_PRINT_DOTS` | `384` | image raster width in dots (58mm ≈ 384, 80mm ≈ 576) |
 | `FAXXME_IMG_MAX_H` | `1200` | max printed image height (dots) |
-| `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB) |
+| `FAXXME_MAX_UPLOAD` | `6291456` | max image upload size (bytes, 6 MB compressed) |
+| `FAXXME_MAX_PIXELS` | `24000000` | max decoded image pixels (w×h); larger is rejected before decode (bomb guard) |
 | `FAXXME_FAX_RATE_MAX` / `FAXXME_FAX_RATE_WINDOW` | `20` / `60` | per-sender rate limit: max faxes per N seconds (0 = off) |
 | `FAXXME_WEBHOOK_RATE_MAX` / `FAXXME_WEBHOOK_RATE_WINDOW` | `5` / `300` | inbound webhook rate limit, enforced per author **and** per calling-site IP (0 = off) |
 | `FAXXME_WEBHOOK_MSG_MAX` | `500` | max characters in an inbound webhook message |
@@ -150,7 +152,7 @@ The site calls FaxxMe **server-side**, not from the visitor's browser. That keep
 
 **Set up (author):** log in → `:: WEBHOOK INTEGRATION → GENERATE SECRET KEY`. The key (`fxwh_…`) shows masked — click the **eye** to reveal, **copy** to copy (it stays viewable in the panel). Hand it to whoever runs the site, to store **server-side** (e.g. in the site's `.env`). The `↻` icon rotates it (old key dies instantly); `revoke` turns the webhook off entirely.
 
-**Scope & safety:** a secret key can *only* deliver a fax to the author who owns it — there's no recipient field to target anyone else. Inbound faxes are rate-limited per author **and** per calling-site IP (derived server-side, not spoofable; `FAXXME_WEBHOOK_RATE_MAX`/`FAXXME_WEBHOOK_RATE_WINDOW`), messages are capped at `FAXXME_WEBHOOK_MSG_MAX`, and they print immediately (fire-and-forget) attributed to the reserved `@webhook` sender. Being spammed? Revoke the key.
+**Scope & safety:** a secret key can *only* deliver a fax to the author who owns it — there's no recipient field to target anyone else. Inbound faxes are rate-limited per author **and** per calling-site IP (`FAXXME_WEBHOOK_RATE_MAX`/`FAXXME_WEBHOOK_RATE_WINDOW`), messages are capped at `FAXXME_WEBHOOK_MSG_MAX`, control characters are stripped before printing, and they print immediately (fire-and-forget) attributed to the reserved `@webhook` sender. The per-author (secret) limit is the primary guard; the per-IP limit is reliable only behind a trusted reverse proxy. Being spammed? Revoke the key.
 
 **`POST /api/fax/inbound`** — `Content-Type: application/x-www-form-urlencoded`, header `Authorization: Bearer <secret key>`:
 
@@ -161,7 +163,7 @@ The site calls FaxxMe **server-side**, not from the visitor's browser. That keep
 | `post` | – | source title, e.g. a post title (≤ 120) |
 | `url` | – | source URL (≤ 200) |
 
-FaxxMe derives the client IP itself for per-IP rate limiting (no spoofable IP field); that IP is your calling server, so add your own per-visitor throttle. Full details in [docs/webhook.md](docs/webhook.md).
+There's no IP field to spoof — FaxxMe takes the client IP from the connection (via the reverse-proxy headers). Behind a trusted proxy (Cloudflare/Caddy) that's reliable; a directly-reachable origin could spoof it, so treat per-IP as best-effort. That IP is your calling server anyway, so add your own per-visitor throttle. Full details in [docs/webhook.md](docs/webhook.md).
 
 Returns `{ "ok": true, "fax_id": …, "delivered": bool }`. Errors: `401` (missing/invalid secret), `400` (empty/too-long message), `429` (rate-limited).
 
