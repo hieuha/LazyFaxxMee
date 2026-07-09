@@ -46,18 +46,24 @@ def _pack(img: "Image.Image") -> bytes:
     return bytes(cmd)
 
 
-def _wrap_chars(text: str, cols: int) -> list[str]:
+def _wrap_px(text: str, font: "ImageFont.FreeTypeFont", max_px: float) -> list[str]:
+    """Wrap to fit `max_px` pixels using the font's real (proportional) glyph widths. The bundled
+    font is proportional, so wrapping by a fixed char count derived from the widest glyph ("M")
+    broke lines far too early — text bunched on the left and every line cost extra paper. Measuring
+    the actual width lets each line fill the paper."""
     out: list[str] = []
     line = ""
     for word in text.split(" "):
-        while len(word) > cols:                  # hard-break very long words
+        while font.getlength(word) > max_px:     # hard-break a single word wider than the line
+            cut = 1
+            while cut < len(word) and font.getlength(word[:cut + 1]) <= max_px:
+                cut += 1
             if line:
                 out.append(line); line = ""
-            out.append(word[:cols]); word = word[cols:]
-        if not line:
-            line = word
-        elif len(line) + 1 + len(word) <= cols:
-            line += " " + word
+            out.append(word[:cut]); word = word[cut:]
+        cand = word if not line else line + " " + word
+        if font.getlength(cand) <= max_px:
+            line = cand
         else:
             out.append(line); line = word
     out.append(line)
@@ -68,11 +74,10 @@ def text_raster(text: str, dots: int = DOTS, size: int | None = None) -> bytes:
     """Render text with a Unicode font and return a crisp (thresholded) `GS v 0` raster.
     `size` overrides the font size (e.g. a smaller attribution footer)."""
     font = ImageFont.truetype(FONT_PATH, size or FONT_SIZE)
-    char_w = max(1, int(font.getlength("M") or 1))
-    cols = max(1, dots // char_w)
+    max_px = max(1, dots - 4)                     # 2px left inset + a hair of right margin
     lines: list[str] = []
     for raw in text.replace("\r\n", "\n").split("\n"):
-        lines.extend(_wrap_chars(raw, cols) if raw else [""])
+        lines.extend(_wrap_px(raw, font, max_px) if raw else [""])
     ascent, descent = font.getmetrics()
     lh = ascent + descent + 4
     img = Image.new("L", (dots, lh * len(lines) + 6), 255)

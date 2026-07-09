@@ -797,6 +797,18 @@ def test_escpos_injection_stripped_from_body():
     client.post("/api/logout")
 
 
+def test_raster_wrap_fills_paper_width():
+    """Rasterized (Vietnamese/Unicode) text must wrap by real glyph width, not the widest-glyph
+    char count — otherwise it bunches on the left and wastes paper. A ~31-char line fits on one
+    58mm (384-dot) line; the old M-based wrap split it into ~2."""
+    from PIL import ImageFont
+    from faxxme import imaging
+    font = ImageFont.truetype(imaging.FONT_PATH, imaging.FONT_SIZE)
+    sample = "xin chao ban toi la mot doc gia"          # ~31 chars, fits one 384-dot line
+    assert font.getlength(sample) <= imaging.DOTS - 4    # sanity: it does fit
+    assert len(imaging._wrap_px(sample, font, imaging.DOTS - 4)) == 1
+
+
 def test_oversized_image_rejected_before_processing():
     """A huge-canvas image is rejected by declared dimensions, before any decode (bomb guard)."""
     import io

@@ -736,6 +736,7 @@ async def ws_endpoint(ws: WebSocket):
                 fax = db.get_fax(fid) if fid else None
                 if fax and fax["recipient_id"] == user["id"] and fax["status"] != "delivered":
                     db.mark_delivered(fid)
+                    await _notify_status(fid)   # push "printed" to the sender's live outbox
             elif msg.get("type") == "ping":
                 db.touch_seen(user["id"])           # heartbeat -> keep last_seen fresh while online
                 await ws.send_json({"type": "pong"})
